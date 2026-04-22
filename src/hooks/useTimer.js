@@ -1,26 +1,21 @@
 import { useState, useEffect, useRef } from "react";
 
-function playLevelUpSound() {
-  if (!(window.AudioContext || window.webkitAudioContext)) {
-    console.warn('Web Audio API not supported in this browser');
-    return;
-  }
-  try {
-    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const oscillator = audioCtx.createOscillator();
-    const gainNode = audioCtx.createGain();
-    oscillator.connect(gainNode);
-    gainNode.connect(audioCtx.destination);
-    oscillator.frequency.setValueAtTime(440, audioCtx.currentTime);
-    gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
-    oscillator.start();
-    oscillator.stop(audioCtx.currentTime + 0.1);
-  } catch (e) {
-    console.warn('Failed to play level up sound:', e);
-  }
-}
-
 export default function useTimer(levels) {
+  // Audio for level‑up sound – defined inside the hook so useRef is called within component context
+  const audioRef = useRef(new Audio("/level-up.mp3"));
+
+  function playLevelUpSound() {
+    try {
+      const audio = audioRef.current;
+      audio.currentTime = 0;
+      audio.play().catch(err => {
+        console.warn("Audio failed:", err);
+      });
+    } catch (err) {
+      console.warn("Audio error:", err);
+    }
+  }
+
   const [currentLevelIndex, setCurrentLevelIndex] = useState(0);
   const [remainingTime, setRemainingTime] = useState(
     levels && levels[0] ? levels[0].duration : 0
@@ -77,22 +72,16 @@ export default function useTimer(levels) {
   };
 
   const nextLevel = () => {
-    setCurrentLevelIndex(prev => {
-      const nextIdx = prev + 1;
-      if (nextIdx >= levels.length) {
-        // Play level up sound
-        playLevelUpSound();
-        pause();
-        setRemainingTime(0);
-        return prev;
-      }
-      setRemainingTime(
-        levels[nextIdx].duration
-      );
-      // Play level up sound
+    const nextIdx = currentLevelIndex + 1;
+    if (nextIdx >= levels.length) {
       playLevelUpSound();
-      return nextIdx;
-    });
+      pause();
+      setRemainingTime(0);
+      return;
+    }
+    playLevelUpSound();
+    setCurrentLevelIndex(nextIdx);
+    setRemainingTime(levels[nextIdx].duration);
   };
 
   const previousLevel = () => {
