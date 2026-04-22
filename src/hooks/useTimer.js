@@ -1,5 +1,3 @@
-// src/hooks/useTimer.js
-
 import { useState, useEffect, useRef } from "react";
 
 function playLevelUpSound() {
@@ -116,14 +114,10 @@ export default function useTimer(levels) {
 
   // Watch remainingTime to advance level when it hits 0
   useEffect(() => {
-
-  if (isRunning && remainingTime === 0) {
-
-    nextLevel();
-
-  }
-
-}, [remainingTime, isRunning]);
+    if (isRunning && remainingTime === 0) {
+      nextLevel();
+    }
+  }, [remainingTime, isRunning]);
 
   return {
     currentLevelIndex,

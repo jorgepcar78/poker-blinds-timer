@@ -1,11 +1,10 @@
 // src/components/NextLevelDisplay.jsx
 
 import React from "react";
-import tournamentState from "../store/tournamentStore";
 
-function NextLevelDisplay() {
-  const nextIndex = tournamentState.currentLevelIndex + 1;
-  const level = tournamentState.levels[nextIndex];
+function NextLevelDisplay({ currentLevelIndex, levels }) {
+  const nextIndex = currentLevelIndex + 1;
+  const level = levels[nextIndex];
   if (!level) return null;
   return (
     <div className="text-center space-y-1">
