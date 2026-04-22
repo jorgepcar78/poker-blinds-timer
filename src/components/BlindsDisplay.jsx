@@ -3,10 +3,15 @@
 import React from "react";
 function BlindsDisplay({ level }) {
   return (
-    <div className="text-center space-y-1">
-      <div>SB {level.smallBlind}</div>
-      <div>BB {level.bigBlind}</div>
-      <div>ANTE {level.ante}</div>
+    <div className="text-center">
+      <div className="text-xl">
+        SB — {level.smallBlind} &nbsp; BB — {level.bigBlind}
+        {level.ante > 0 && (
+          <>
+            &nbsp; ANTE — {level.ante}
+          </>
+        )}
+      </div>
     </div>
   );
 }

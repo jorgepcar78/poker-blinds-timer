@@ -2,18 +2,18 @@
 
 import React from "react";
 
-function Controls({ isRunning, start, pause, nextLevel, previousLevel }) {
+function Controls({ isRunning, start, pause, nextLevel, previousLevel, className }) {
   return (
-    <div className="flex space-x-4">
-      <button className="px-4 py-2 bg-gray-800 rounded-lg text-lg" onClick={previousLevel}>Anterior</button>
+    <div className={className}>
+      <button className="px-6 py-3 text-lg rounded-xl bg-gray-800" onClick={previousLevel}>Anterior</button>
       <button
-        className="px-4 py-2 bg-green-600 rounded-lg text-lg"
+        className="px-6 py-3 text-lg rounded-xl bg-green-600"
         onClick={isRunning ? pause : start}
       >
         {isRunning ? "Pausar" : "Iniciar"}
       </button>
       <button
-        className="px-4 py-2 bg-gray-800 rounded-lg text-lg"
+        className="px-6 py-3 text-lg rounded-xl bg-gray-800"
         onClick={nextLevel}
       >
         Próximo

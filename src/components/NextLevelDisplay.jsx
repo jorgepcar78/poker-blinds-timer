@@ -7,11 +7,16 @@ function NextLevelDisplay({ currentLevelIndex, levels }) {
   const level = levels[nextIndex];
   if (!level) return null;
   return (
-    <div className="text-center space-y-1">
-      <div className="font-bold">PRÓXIMO</div>
-      <div>SB {level.smallBlind}</div>
-      <div>BB {level.bigBlind}</div>
-      <div>ANTE {level.ante}</div>
+    <div className="text-center">
+      <div className="font-bold text-xl">PRÓXIMO</div>
+      <div>
+        SB — {level.smallBlind} &nbsp; BB — {level.bigBlind}
+        {level.ante > 0 && (
+          <>
+            &nbsp; ANTE — {level.ante}
+          </>
+        )}
+      </div>
     </div>
   );
 }
