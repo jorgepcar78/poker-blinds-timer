@@ -15,9 +15,10 @@ function SettingsPage() {
     { smallBlind: 1500, bigBlind: 3000, ante: 0, duration: 10 }
   ];
   const [levels, setLevels] = useState(() => {
-    const saved = localStorage.getItem("tournament-levels");
-    return saved ? JSON.parse(saved) : defaultLevels;
-  });
+  const saved = localStorage.getItem("tournament-levels");
+  return saved ? JSON.parse(saved) : defaultLevels;
+});
+const [batchDuration, setBatchDuration] = useState('');
 
   const handleAddLevel = () => {
     setLevels([...levels, { smallBlind: 0, bigBlind: 0, ante: 0, duration: 20 }]);
@@ -42,6 +43,27 @@ function SettingsPage() {
     <div className="h-screen bg-black text-white p-4 overflow-y-auto">
       <div className="max-w-md mx-auto">
         <h1 className="text-3xl font-bold mb-6">CONFIGURAÇÕES</h1>
+          {/* Batch duration input */}
+          <div className="mb-4 p-4 bg-gray-800 rounded">
+            <label className="block text-sm font-medium mb-1">Definir Duração (minutos) para TODOS os níveis</label>
+            <input
+              type="number"
+              value={batchDuration || ''}
+              onChange={(e) => setBatchDuration(parseInt(e.target.value) || '')}
+              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white mb-2"
+            />
+            <button
+              onClick={() => {
+                if (batchDuration) {
+                  const newLevels = levels.map(l => ({ ...l, duration: batchDuration }));
+                  setLevels(newLevels);
+                }
+              }}
+              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded"
+            >
+              Aplicar a todos
+            </button>
+          </div>
 
         {/* Levels List */}
         {levels.map((level, index) => (
