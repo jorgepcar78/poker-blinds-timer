@@ -1,25 +1,28 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 
+import TournamentProvider from "./context/TournamentProvider";
 import TimerPage from "./pages/TimerPage";
 import SettingsPage from "./pages/SettingsPage";
 
 function App() {
   return (
-    <BrowserRouter>
-      <Routes>
+    <TournamentProvider>
+      <BrowserRouter>
+        <Routes>
 
-        <Route
-          path="/"
-          element={<TimerPage />}
-        />
+          <Route
+            path="/"
+            element={<TimerPage />}
+          />
 
-        <Route
-          path="/settings"
-          element={<SettingsPage />}
-        />
+          <Route
+            path="/settings"
+            element={<SettingsPage />}
+          />
 
-      </Routes>
-    </BrowserRouter>
+        </Routes>
+      </BrowserRouter>
+    </TournamentProvider>
   );
 }
 
