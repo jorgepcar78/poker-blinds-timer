@@ -182,28 +182,31 @@ export default function LivePage() {
       notice={
         !isLive ? (
           <Alert tone="error" className="text-xs">
-            Sem conexão com o host há {formatAge(age)}. O relógio continua pelo último
-            estado recebido.
+            Sem conexão há {formatAge(age)}. O relógio segue pelo último estado.
           </Alert>
         ) : null
       }
     >
-      <Button
-        variant={soundEnabled ? "secondary" : "primary"}
-        icon={soundEnabled ? "volume_up" : "volume_off"}
-        onClick={handleEnableSound}
-        aria-pressed={soundEnabled}
-      >
-        {soundEnabled ? "Som ligado" : "Ativar som"}
-      </Button>
+      <div className="flex w-full flex-wrap items-center justify-center gap-x-3 gap-y-1">
+        <Button
+          variant={soundEnabled ? "secondary" : "primary"}
+          icon={soundEnabled ? "volume_up" : "volume_off"}
+          onClick={handleEnableSound}
+          aria-pressed={soundEnabled}
+        >
+          {soundEnabled ? "Som ligado" : "Ativar som"}
+        </Button>
 
-      {soundStatus && (
-        <p role="status" className="text-center text-xs text-green-300">
-          {soundStatus}
+        {soundStatus && (
+          <p role="status" className="text-center text-xs text-green-300">
+            {soundStatus}
+          </p>
+        )}
+
+        <p className="text-center text-xs text-gray-400">
+          Link de acompanhamento · só o timer
         </p>
-      )}
-
-      <p className="text-center text-xs text-gray-400">Link de acompanhamento · só o timer</p>
+      </div>
     </TimerStage>
   );
 }
