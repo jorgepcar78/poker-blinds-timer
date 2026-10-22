@@ -1,14 +1,14 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import { useTournamentContext } from "../context/TournamentContext";
 import { useSessionContext } from "../context/SessionContext";
 import {
   dismissFullscreenHint,
-  getFullscreenApi,
   isFullscreenHintDismissed,
   isIos,
   isStandalone,
 } from "../utils/platform";
+import useFullscreen from "../hooks/useFullscreen";
 import Controls from "../components/Controls";
 import TimerStage from "../components/TimerStage";
 import Icon from "../components/ui/Icon";
@@ -30,51 +30,13 @@ function TimerPage() {
   const { session, liveStatus } = useSessionContext();
   const liveError = Boolean(session.live?.active && liveStatus === "error");
 
-  const [capabilities] = useState(() => {
-    const fullscreen = getFullscreenApi();
-    const ios = isIos();
-
-    return {
-      fullscreen,
-      canUseFullscreen: fullscreen.supported && !ios,
-      showInstallHint: ios && !isStandalone(),
-    };
-  });
-
-  const { fullscreen } = capabilities;
-  const [isFullscreen, setIsFullscreen] = useState(() => Boolean(fullscreen.getElement()));
+  const { fullscreen, canUseFullscreen, isFullscreen, toggleFullscreen } = useFullscreen();
   const [showInstallHint, setShowInstallHint] = useState(
-    () => capabilities.showInstallHint && !isFullscreenHintDismissed()
+    () => isIos() && !isStandalone() && !isFullscreenHintDismissed()
   );
 
-  useEffect(() => {
-    const updateFullscreenState = () => {
-      setIsFullscreen(Boolean(fullscreen.getElement()));
-    };
-
-    document.addEventListener("fullscreenchange", updateFullscreenState);
-    document.addEventListener("webkitfullscreenchange", updateFullscreenState);
-
-    return () => {
-      document.removeEventListener("fullscreenchange", updateFullscreenState);
-      document.removeEventListener("webkitfullscreenchange", updateFullscreenState);
-    };
-  }, [fullscreen]);
-
-  const toggleFullscreen = async () => {
-    try {
-      if (fullscreen.getElement()) {
-        await fullscreen.exit();
-      } else {
-        await fullscreen.request();
-      }
-    } catch (error) {
-      console.warn("Fullscreen error:", error);
-    }
-  };
-
   const handleStartClick = () => {
-    if (capabilities.canUseFullscreen && !fullscreen.getElement()) {
+    if (canUseFullscreen && !fullscreen.getElement()) {
       try {
         Promise.resolve(fullscreen.request()).catch((error) =>
           console.warn("Fullscreen error:", error)
@@ -116,7 +78,7 @@ function TimerPage() {
 
   const actions = (
     <>
-      {capabilities.canUseFullscreen && (
+      {canUseFullscreen && (
         <IconButton
           icon={isFullscreen ? "fullscreen_exit" : "fullscreen"}
           label={isFullscreen ? "Sair da tela cheia" : "Entrar em tela cheia"}

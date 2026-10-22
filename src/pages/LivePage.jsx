@@ -4,8 +4,16 @@ import React, { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { createAudioEngine } from "../utils/audioEngine";
 import useLiveViewer from "../hooks/useLiveViewer";
+import useFullscreen from "../hooks/useFullscreen";
 import TimerStage from "../components/TimerStage";
-import { Alert, Badge, Button, EmptyState, PageShell } from "../components/ui/ui";
+import {
+  Alert,
+  Badge,
+  Button,
+  EmptyState,
+  IconButton,
+  PageShell,
+} from "../components/ui/ui";
 
 function useWakeLock() {
   useEffect(() => {
@@ -55,6 +63,7 @@ export default function LivePage() {
   });
   const [soundStatus, setSoundStatus] = useState("");
   const previousLevelRef = useRef(null);
+  const { canUseFullscreen, isFullscreen, toggleFullscreen } = useFullscreen();
 
   useWakeLock();
 
@@ -154,6 +163,16 @@ export default function LivePage() {
     <TimerStage
       name={display.name}
       status={<Badge tone={statusTone}>{status}</Badge>}
+      actions={
+        canUseFullscreen ? (
+          <IconButton
+            icon={isFullscreen ? "fullscreen_exit" : "fullscreen"}
+            label={isFullscreen ? "Sair da tela cheia" : "Entrar em tela cheia"}
+            onClick={toggleFullscreen}
+            aria-pressed={isFullscreen}
+          />
+        ) : null
+      }
       level={level}
       levelIndex={display.levelIndex}
       levelCount={display.levels.length}
