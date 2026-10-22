@@ -69,16 +69,27 @@ não passe `--d1=DB` (isso cria um banco local separado).
 
 ## Deploy na Cloudflare
 
-1. `npx wrangler login`
-2. `npm run db:create` e copie o `database_id` retornado para o `wrangler.jsonc`.
-3. `npm run db:migrate` para aplicar a migration no banco remoto.
-4. No Cloudflare Pages, conecte o repositório do GitHub:
-   - Build command: `npm run build`
-   - Output directory: `dist`
-   - O binding D1 `DB` já está declarado no `wrangler.jsonc`.
-5. Alternativa por CLI: `npx wrangler pages deploy dist`.
+Deploy atual: **https://poker-blinds-timer.pages.dev**
 
-O `wrangler.jsonc` vem com um `database_id` de exemplo; troque pelo ID real antes do deploy.
+O D1 `poker-blinds-timer` já foi criado e a migration `0001_live_sessions.sql` está aplicada
+no banco remoto. O binding `DB` e o `database_id` real estão no `wrangler.jsonc`.
+
+Para publicar uma nova versão:
+
+```bash
+npm run build
+npx wrangler pages deploy dist --project-name poker-blinds-timer --branch main
+```
+
+O deploy acima envia também `functions/` e o `_redirects`. Para automatizar via Git, conecte
+o repositório no painel do Pages:
+
+- Build command: `npm run build`
+- Output directory: `dist`
+- O binding D1 `DB` já está declarado no `wrangler.jsonc`.
+
+Para recriar o banco em outra conta: `npm run db:create`, atualize o `database_id` no
+`wrangler.jsonc` e rode `npm run db:migrate`.
 
 As rotas novas da SPA precisam ser adicionadas em `public/_redirects` (hoje: `/menu`,
 `/session`, `/settings` e `/live/*`). O service worker já faz o fallback offline.
