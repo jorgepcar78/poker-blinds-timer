@@ -1,8 +1,23 @@
 import React, { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
 import { useTournamentContext } from "../context/TournamentContext";
 import { DEFAULT_LEVELS, LEVEL_PRESETS } from "../store/tournamentStore";
 import { getFullscreenApi, isIos, isStandalone } from "../utils/platform";
+import useInstallPrompt from "../hooks/useInstallPrompt";
+import InstallAppCard from "../components/InstallAppCard";
+import Icon from "../components/ui/Icon";
+import {
+  Accordion,
+  Alert,
+  Button,
+  Card,
+  Field,
+  IconButton,
+  PageHeader,
+  PageShell,
+  SectionTitle,
+  Tile,
+} from "../components/ui/ui";
+import { focusRing, inputClass } from "../components/ui/styles";
 
 const MAX_DURATION_MINUTES = 600;
 
@@ -10,9 +25,18 @@ function cloneLevels(levels) {
   return levels.map((level) => ({ ...level }));
 }
 
+function formatDuration(totalMinutes) {
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  if (hours === 0) return `${minutes}min`;
+  if (minutes === 0) return `${hours}h`;
+  return `${hours}h${String(minutes).padStart(2, "0")}`;
+}
+
 function SettingsPage() {
-  const navigate = useNavigate();
   const { levels: savedLevels, updateLevels, testSound, getAudioState } = useTournamentContext();
+  const installState = useInstallPrompt();
 
   const [levels, setLevels] = useState(() => cloneLevels(savedLevels));
   const [batchDuration, setBatchDuration] = useState("");
@@ -21,6 +45,10 @@ function SettingsPage() {
   const [soundStatus, setSoundStatus] = useState(null);
   const [diagnostics, setDiagnostics] = useState([]);
   const [copyStatus, setCopyStatus] = useState("");
+  const [installHelpOpen, setInstallHelpOpen] = useState(false);
+
+  const totalMinutes = levels.reduce((sum, level) => sum + (Number(level.duration) || 0), 0);
+  const durationLabel = formatDuration(totalMinutes);
 
   const buildDiagnostics = () => {
     const fullscreen = getFullscreenApi();
@@ -33,6 +61,7 @@ function SettingsPage() {
       ["Áudio", `${audio.mode} (${audio.contextState})`],
       ["Som carregado", audio.soundLoaded ? "sim" : "não"],
       ["AudioSession", audio.audioSession ? "disponível" : "indisponível"],
+      ["Instalação", installState],
       ["Wake Lock", "wakeLock" in navigator ? "disponível" : "indisponível"],
       ["Tela", `${window.screen.width}x${window.screen.height}`],
       ["User agent", navigator.userAgent],
@@ -86,6 +115,7 @@ function SettingsPage() {
         duration: lastLevel ? lastLevel.duration : 20,
       },
     ]);
+    setError("");
     setSaved(false);
   };
 
@@ -143,230 +173,328 @@ function SettingsPage() {
     updateLevels(levels);
     setError("");
     setSaved(true);
-    window.setTimeout(() => navigate("/"), 600);
   };
 
   return (
-    <div className="min-h-dvh bg-black p-4 text-white">
-      <div className="mx-auto max-w-md">
-        <div className="mb-6 flex items-center justify-between">
-          <h1 className="text-3xl font-bold">CONFIGURAÇÕES</h1>
-          <Link to="/" className="text-sm text-gray-400 hover:text-white">
-            Voltar
-          </Link>
-        </div>
+    <PageShell>
+      <PageHeader
+        backTo="/menu"
+        backLabel="Menu"
+        title="Configurações"
+        description="Ajuste a estrutura do torneio e o comportamento do app."
+      />
 
-        {/* Presets */}
-        <div className="mb-4 rounded bg-gray-800 p-4">
-          <h2 className="mb-2 text-sm font-medium">Estruturas prontas</h2>
-          <div className="flex flex-wrap gap-2">
-            {LEVEL_PRESETS.map((preset) => (
-              <button
-                key={preset.id}
-                type="button"
-                onClick={() => applyPreset(preset)}
-                className="rounded bg-gray-700 px-3 py-2 text-sm hover:bg-gray-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
-              >
-                {preset.name}
-              </button>
-            ))}
-          </div>
-          <p className="mt-2 text-xs text-gray-400">
-            A estrutura escolhida substitui a lista abaixo. Salve para aplicar.
-          </p>
-        </div>
-
-        {/* Sound test */}
-        <div className="mb-4 rounded bg-gray-800 p-4">
-          <h2 className="mb-2 text-sm font-medium">Som</h2>
-          <button
-            type="button"
-            onClick={handleTestSound}
-            className="rounded bg-indigo-600 px-4 py-2 font-bold hover:bg-indigo-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
-          >
-            Testar som
-          </button>
-          <p className="mt-2 text-xs text-gray-400">
-            No iPhone, o áudio só é liberado depois do primeiro toque na tela.
-          </p>
-          {soundStatus && (
-            <p
-              role="status"
-              className={`mt-2 text-xs ${soundStatus.ok ? "text-green-300" : "text-red-300"}`}
-            >
-              {soundStatus.message}
-            </p>
-          )}
-        </div>
-
-        {/* Batch duration */}
-        <div className="mb-4 rounded bg-gray-800 p-4">
-          <label htmlFor="batch-duration" className="mb-1 block text-sm font-medium">
-            Definir duração (minutos) para TODOS os níveis
-          </label>
-          <div className="flex gap-2">
-            <input
-              id="batch-duration"
-              type="number"
-              min={1}
-              max={MAX_DURATION_MINUTES}
-              inputMode="numeric"
-              value={batchDuration}
-              onChange={(event) => setBatchDuration(event.target.value)}
-              className="w-full rounded border border-gray-600 bg-gray-700 px-3 py-2 text-white"
-            />
-            <button
-              type="button"
-              onClick={applyBatchDuration}
-              className="shrink-0 rounded bg-indigo-600 px-4 py-2 font-bold hover:bg-indigo-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
-            >
-              Aplicar
-            </button>
-          </div>
-        </div>
-
-        {/* Levels list */}
-        {levels.map((level, index) => (
-          <div key={index} className="mb-4 rounded-lg bg-gray-800 p-4">
-            <h2 className="mb-2 text-xl font-semibold">Nível {index + 1}</h2>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="mb-1 block text-sm font-medium">Small Blind</label>
-                <input
-                  type="number"
-                  min={1}
-                  inputMode="numeric"
-                  value={level.smallBlind}
-                  onChange={(event) => updateLevelField(index, "smallBlind", event.target.value)}
-                  className="w-full rounded border border-gray-600 bg-gray-700 px-3 py-2 text-white"
-                />
+      <div className="space-y-3">
+        <Accordion
+          id="game"
+          title="Jogo"
+          meta={`${levels.length} níveis · ${durationLabel}`}
+          defaultOpen
+        >
+          <div className="space-y-5">
+            <div>
+              <SectionTitle>Estruturas prontas</SectionTitle>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {LEVEL_PRESETS.map((preset) => (
+                  <Button
+                    key={preset.id}
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => applyPreset(preset)}
+                  >
+                    {preset.name}
+                  </Button>
+                ))}
               </div>
-
-              <div>
-                <label className="mb-1 block text-sm font-medium">Big Blind</label>
-                <input
-                  type="number"
-                  min={1}
-                  inputMode="numeric"
-                  value={level.bigBlind}
-                  onChange={(event) => updateLevelField(index, "bigBlind", event.target.value)}
-                  className="w-full rounded border border-gray-600 bg-gray-700 px-3 py-2 text-white"
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block text-sm font-medium">Ante</label>
-                <input
-                  type="number"
-                  min={0}
-                  inputMode="numeric"
-                  value={level.ante}
-                  onChange={(event) => updateLevelField(index, "ante", event.target.value)}
-                  className="w-full rounded border border-gray-600 bg-gray-700 px-3 py-2 text-white"
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block text-sm font-medium">Duração (min)</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={MAX_DURATION_MINUTES}
-                  inputMode="numeric"
-                  value={level.duration}
-                  onChange={(event) => updateLevelField(index, "duration", event.target.value)}
-                  className="w-full rounded border border-gray-600 bg-gray-700 px-3 py-2 text-white"
-                />
-              </div>
+              <p className="mt-2 text-xs leading-relaxed text-gray-400">
+                A estrutura escolhida substitui a lista abaixo. Salve para aplicar.
+              </p>
             </div>
 
-            <button
-              type="button"
-              onClick={() => handleRemoveLevel(index)}
-              className="mt-3 w-full rounded bg-red-600 px-4 py-2 font-bold hover:bg-red-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
-            >
-              Remover
-            </button>
-          </div>
-        ))}
-
-        <button
-          type="button"
-          onClick={handleAddLevel}
-          className="mb-3 w-full rounded bg-green-600 px-4 py-3 font-bold hover:bg-green-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
-        >
-          + Adicionar nível
-        </button>
-
-        <button
-          type="button"
-          onClick={() => {
-            setLevels(cloneLevels(DEFAULT_LEVELS));
-            setError("");
-            setSaved(false);
-          }}
-          className="mb-6 w-full rounded bg-gray-800 px-4 py-2 text-sm font-semibold hover:bg-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
-        >
-          Restaurar estrutura padrão
-        </button>
-
-        {error && (
-          <p role="alert" className="mb-3 rounded bg-red-900/60 px-3 py-2 text-sm text-red-200">
-            {error}
-          </p>
-        )}
-
-        {saved && (
-          <p role="status" className="mb-3 rounded bg-green-900/60 px-3 py-2 text-sm text-green-200">
-            Configurações salvas!
-          </p>
-        )}
-
-        <button
-          type="button"
-          onClick={handleSave}
-          className="w-full rounded bg-blue-600 px-4 py-3 font-bold hover:bg-blue-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
-        >
-          Salvar configurações
-        </button>
-
-        <details
-          className="mt-6 rounded bg-gray-800 p-4 text-sm"
-          onToggle={(event) => {
-            if (event.currentTarget.open) setDiagnostics(buildDiagnostics());
-          }}
-        >
-          <summary className="cursor-pointer font-medium">Diagnóstico</summary>
-          <p className="mt-2 text-xs text-gray-400">
-            Use no iPhone para conferir o que está ativo neste navegador.
-          </p>
-
-          {diagnostics.length > 0 && (
-            <dl className="mt-3 space-y-1">
-              {diagnostics.map(([label, value]) => (
-                <div key={label} className="flex justify-between gap-4 text-xs">
-                  <dt className="shrink-0 text-gray-400">{label}</dt>
-                  <dd className="break-all text-right text-gray-200">{value}</dd>
+            <div className="border-t border-white/10 pt-4">
+              <Field
+                label="Duração para todos os níveis"
+                htmlFor="batch-duration"
+                suffix="min"
+              >
+                <div className="flex gap-2">
+                  <input
+                    id="batch-duration"
+                    type="number"
+                    min={1}
+                    max={MAX_DURATION_MINUTES}
+                    inputMode="numeric"
+                    value={batchDuration}
+                    onChange={(event) => setBatchDuration(event.target.value)}
+                    placeholder="Ex.: 15"
+                    className={inputClass}
+                  />
+                  <Button
+                    variant="secondary"
+                    onClick={applyBatchDuration}
+                    className="shrink-0"
+                  >
+                    Aplicar
+                  </Button>
                 </div>
-              ))}
-            </dl>
+              </Field>
+              <p className="mt-2 text-xs leading-relaxed text-gray-400">
+                Aplica a mesma duração a todos os níveis de uma vez.
+              </p>
+            </div>
+
+            <div className="border-t border-white/10 pt-4">
+              <SectionTitle meta={`${levels.length} níveis`}>Níveis</SectionTitle>
+
+              <div className="mt-3 space-y-2">
+                {levels.map((level, index) => (
+                  <details
+                    key={index}
+                    className="group rounded-xl border border-white/10 bg-white/[0.03]"
+                  >
+                    <summary
+                      className={`flex min-h-12 cursor-pointer list-none items-center gap-3 px-3 py-3 [&::-webkit-details-marker]:hidden ${focusRing}`}
+                    >
+                      <span className="text-sm font-semibold text-white">Nível {index + 1}</span>
+                      <span className="min-w-0 flex-1 text-right text-xs leading-snug text-gray-400">
+                        {level.smallBlind}/{level.bigBlind}
+                        {level.ante > 0 ? ` · ante ${level.ante}` : ""} · {level.duration} min
+                      </span>
+                      <Icon
+                        name="expand_more"
+                        size={20}
+                        className="text-gray-400 transition-transform group-open:rotate-180"
+                      />
+                    </summary>
+
+                    <div className="border-t border-white/10 p-3">
+                      <div className="grid grid-cols-2 gap-3">
+                        <Field label="Small blind" htmlFor={`level-${index}-small-blind`}>
+                          <input
+                            id={`level-${index}-small-blind`}
+                            type="number"
+                            min={1}
+                            inputMode="numeric"
+                            value={level.smallBlind}
+                            onChange={(event) =>
+                              updateLevelField(index, "smallBlind", event.target.value)
+                            }
+                            className={inputClass}
+                          />
+                        </Field>
+
+                        <Field label="Big blind" htmlFor={`level-${index}-big-blind`}>
+                          <input
+                            id={`level-${index}-big-blind`}
+                            type="number"
+                            min={1}
+                            inputMode="numeric"
+                            value={level.bigBlind}
+                            onChange={(event) =>
+                              updateLevelField(index, "bigBlind", event.target.value)
+                            }
+                            className={inputClass}
+                          />
+                        </Field>
+
+                        <Field label="Ante" htmlFor={`level-${index}-ante`}>
+                          <input
+                            id={`level-${index}-ante`}
+                            type="number"
+                            min={0}
+                            inputMode="numeric"
+                            value={level.ante}
+                            onChange={(event) =>
+                              updateLevelField(index, "ante", event.target.value)
+                            }
+                            className={inputClass}
+                          />
+                        </Field>
+
+                        <Field label="Duração" htmlFor={`level-${index}-duration`} suffix="min">
+                          <input
+                            id={`level-${index}-duration`}
+                            type="number"
+                            min={1}
+                            max={MAX_DURATION_MINUTES}
+                            inputMode="numeric"
+                            value={level.duration}
+                            onChange={(event) =>
+                              updateLevelField(index, "duration", event.target.value)
+                            }
+                            className={inputClass}
+                          />
+                        </Field>
+                      </div>
+
+                      <Button
+                        variant="dangerGhost"
+                        size="sm"
+                        icon="delete"
+                        onClick={() => handleRemoveLevel(index)}
+                        className="mt-3 w-full"
+                      >
+                        Remover nível
+                      </Button>
+                    </div>
+                  </details>
+                ))}
+              </div>
+
+              <div className="mt-3 grid gap-2">
+                <Button
+                  variant="secondary"
+                  icon="add"
+                  onClick={handleAddLevel}
+                  className="w-full"
+                >
+                  Adicionar nível
+                </Button>
+                <Button
+                  variant="ghost"
+                  icon="restart_alt"
+                  onClick={() => {
+                    setLevels(cloneLevels(DEFAULT_LEVELS));
+                    setError("");
+                    setSaved(false);
+                  }}
+                  className="w-full"
+                >
+                  Restaurar padrão
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Accordion>
+
+        <Accordion id="app" title="App" meta="Som, instalação e diagnóstico">
+          <div className="grid grid-cols-2 gap-3">
+            <Tile icon="volume_up" title="Som">
+              <p className="text-xs leading-relaxed text-gray-400">
+                Teste o áudio antes de começar.
+              </p>
+              <Button
+                variant="secondary"
+                size="sm"
+                icon="play_arrow"
+                onClick={handleTestSound}
+                className="mt-auto w-full"
+              >
+                Testar
+              </Button>
+              {soundStatus && (
+                <p
+                  role="status"
+                  className={`mt-2 text-xs ${soundStatus.ok ? "text-green-300" : "text-red-300"}`}
+                >
+                  {soundStatus.message}
+                </p>
+              )}
+            </Tile>
+
+            <InstallAppCard onShowHelp={() => setInstallHelpOpen((open) => !open)} />
+          </div>
+
+          {installHelpOpen && (
+            <Card className="mt-3 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold text-white">Como instalar</h3>
+                <IconButton
+                  icon="close"
+                  label="Fechar instruções"
+                  variant="ghost"
+                  onClick={() => setInstallHelpOpen(false)}
+                />
+              </div>
+              <ol className="mt-2 space-y-2 text-xs leading-relaxed text-gray-300">
+                <li className="flex gap-2">
+                  <span className="font-mono text-gray-400">1.</span>
+                  Abra o app no navegador do celular.
+                </li>
+                <li className="flex gap-2">
+                  <span className="font-mono text-gray-400">2.</span>
+                  Toque em Compartilhar no iPhone ou no menu do navegador no Android.
+                </li>
+                <li className="flex gap-2">
+                  <span className="font-mono text-gray-400">3.</span>
+                  Escolha “Adicionar à Tela de Início” ou “Instalar app”.
+                </li>
+              </ol>
+            </Card>
           )}
 
-          <button
-            type="button"
-            onClick={handleCopyDiagnostics}
-            className="mt-3 rounded bg-gray-700 px-3 py-2 text-xs font-semibold hover:bg-gray-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+          <details
+            className="group mt-4 border-t border-white/10 pt-3"
+            onToggle={(event) => {
+              if (event.currentTarget.open) setDiagnostics(buildDiagnostics());
+            }}
           >
-            Copiar diagnóstico
-          </button>
-          {copyStatus && (
-            <span role="status" className="ml-2 text-xs text-green-300">
-              {copyStatus}
-            </span>
-          )}
-        </details>
+            <summary
+              className={`flex cursor-pointer list-none items-center justify-between gap-3 py-1 text-sm font-semibold text-gray-200 [&::-webkit-details-marker]:hidden ${focusRing}`}
+            >
+              <span>Diagnóstico</span>
+              <Icon
+                name="expand_more"
+                size={20}
+                className="text-gray-400 transition-transform group-open:rotate-180"
+              />
+            </summary>
+            <p className="mt-2 text-xs leading-relaxed text-gray-400">
+              Use no iPhone para conferir o que está ativo neste navegador.
+            </p>
+
+            {diagnostics.length > 0 && (
+              <dl className="mt-3 space-y-1.5">
+                {diagnostics.map(([label, value]) => (
+                  <div
+                    key={label}
+                    className="flex justify-between gap-4 border-b border-white/5 pb-1 text-xs last:border-0"
+                  >
+                    <dt className="shrink-0 text-gray-400">{label}</dt>
+                    <dd className="break-all text-right text-gray-200">{value}</dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+
+            <div className="mt-3 flex items-center gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                icon="content_copy"
+                onClick={handleCopyDiagnostics}
+              >
+                Copiar diagnóstico
+              </Button>
+              {copyStatus && (
+                <span role="status" className="text-xs text-green-300">
+                  {copyStatus}
+                </span>
+              )}
+            </div>
+          </details>
+        </Accordion>
       </div>
-    </div>
+
+      <div
+        className="sticky bottom-0 z-20 -mx-4 mt-6 border-t border-white/10 bg-black/95 px-4 py-3 backdrop-blur"
+        style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
+      >
+        {saved && (
+          <p
+            role="status"
+            className="mb-2 flex items-center gap-1.5 text-sm font-medium text-green-300"
+          >
+            <Icon name="check_circle" size={18} />
+            Alterações salvas.
+          </p>
+        )}
+        {error && <Alert tone="error" className="mb-2">{error}</Alert>}
+        <Button size="lg" icon="save" onClick={handleSave} className="w-full">
+          Salvar alterações
+        </Button>
+      </div>
+    </PageShell>
   );
 }
 

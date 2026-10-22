@@ -1,0 +1,4 @@
+/menu / 200
+/session / 200
+/settings / 200
+/live/* / 200

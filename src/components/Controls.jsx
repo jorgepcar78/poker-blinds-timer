@@ -1,34 +1,46 @@
 // src/components/Controls.jsx
 
 import React from "react";
+import { Button } from "./ui/ui";
 
-function Controls({ isRunning, start, pause, nextLevel, previousLevel, className }) {
-  const buttonClass =
-    "rounded-xl px-4 py-3 text-base font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 sm:px-6 sm:text-lg";
-
+function Controls({
+  isRunning,
+  isFinished,
+  start,
+  pause,
+  nextLevel,
+  previousLevel,
+  className = "",
+}) {
   return (
-    <div className={className}>
-      <button
-        type="button"
-        className={`${buttonClass} bg-gray-800 hover:bg-gray-700`}
+    <div className={`grid w-full grid-cols-3 gap-2 ${className}`}>
+      <Button
+        variant="secondary"
+        size="xs"
+        icon="skip_previous"
         onClick={previousLevel}
+        className="w-full"
       >
         Anterior
-      </button>
-      <button
-        type="button"
-        className={`${buttonClass} ${isRunning ? "bg-amber-600 hover:bg-amber-500" : "bg-green-600 hover:bg-green-500"}`}
+      </Button>
+      <Button
+        size="xs"
+        icon={isRunning ? "pause" : "play_arrow"}
         onClick={isRunning ? pause : start}
+        className="w-full"
       >
         {isRunning ? "Pausar" : "Iniciar"}
-      </button>
-      <button
-        type="button"
-        className={`${buttonClass} bg-gray-800 hover:bg-gray-700`}
+      </Button>
+      <Button
+        variant="secondary"
+        size="xs"
+        icon="skip_next"
         onClick={nextLevel}
+        disabled={isFinished}
+        className="w-full"
       >
         Próximo
-      </button>
+      </Button>
     </div>
   );
 }
