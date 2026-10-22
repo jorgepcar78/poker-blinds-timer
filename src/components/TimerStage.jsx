@@ -28,7 +28,7 @@ export default function TimerStage({
         paddingBottom: "max(1rem, env(safe-area-inset-bottom))",
       }}
     >
-      <header className="w-full">
+      <header className="w-full shrink-0">
         <div className="flex min-h-11 items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2">
             {name && <span className="truncate text-sm text-gray-400">{name}</span>}
@@ -53,11 +53,11 @@ export default function TimerStage({
         {notice && <div className="mx-auto mt-3 max-w-md">{notice}</div>}
       </header>
 
-      <main className="flex flex-1 flex-col items-center justify-center py-3">
+      <main className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden py-2">
         <div
           role="timer"
           aria-live="off"
-          className={`font-mono text-[clamp(4.5rem,26vw,12rem)] font-semibold leading-none tracking-tight tabular-nums ${
+          className={`font-mono text-[min(26vw,27dvh,12rem)] font-semibold leading-none tracking-tight tabular-nums ${
             lastMinute ? "text-red-500" : "text-white"
           }`}
         >
@@ -70,7 +70,7 @@ export default function TimerStage({
         )}
       </main>
 
-      <footer className="flex w-full flex-col items-center gap-3">
+      <footer className="flex w-full shrink-0 flex-col items-center gap-2 sm:gap-3">
         <div className="flex flex-wrap items-center justify-center gap-2">
           <span className="text-xs font-semibold text-gray-400">Próximo</span>
           {nextLevel ? (
