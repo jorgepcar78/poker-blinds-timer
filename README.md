@@ -69,7 +69,7 @@ não passe `--d1=DB` (isso cria um banco local separado).
 
 ## Deploy na Cloudflare
 
-Deploy atual: **https://poker-blinds-timer.pages.dev**
+Deploy atual: **https://poker-blinds.pages.dev**
 
 O D1 `poker-blinds-timer` já foi criado e a migration `0001_live_sessions.sql` está aplicada
 no banco remoto. O binding `DB` e o `database_id` real estão no `wrangler.jsonc`.
@@ -78,7 +78,7 @@ Para publicar uma nova versão:
 
 ```bash
 npm run build
-npx wrangler pages deploy dist --project-name poker-blinds-timer --branch main
+npx wrangler pages deploy dist --project-name poker-blinds --branch main
 ```
 
 O deploy acima envia também `functions/` e o `_redirects`. Para automatizar via Git, conecte
