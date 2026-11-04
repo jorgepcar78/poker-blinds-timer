@@ -93,7 +93,7 @@ test("normalizeSession filters invalid cost references and payments", () => {
     ],
     payments: [
       { id: "pay1", fromId: "p1", toId: "p9", amountCents: 500 },
-      { id: "pay2", fromId: "p1", toId: "x1", amountCents: 500 },
+      { id: "pay2", fromId: "p1", toId: "x1", amountCents: 500, kind: "game", costId: "c1" },
       { id: "pay3", fromId: "p1", toId: "p1", amountCents: 500 },
     ],
     cash: { inHand: true, holderId: "p9" },
@@ -103,6 +103,8 @@ test("normalizeSession filters invalid cost references and payments", () => {
   assert.equal(session.costs[0].creditorId, "");
   assert.equal(session.payments.length, 1);
   assert.equal(session.payments[0].id, "pay2");
+  assert.equal(session.payments[0].kind, "game");
+  assert.equal(session.payments[0].costId, "c1");
   assert.deepEqual(session.cash, { inHand: true, holderId: null });
 });
 

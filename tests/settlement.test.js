@@ -1,12 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  allocateProportional,
   allocateReais,
   splitEqual,
   computePool,
   computeCosts,
   buildSettlement,
   buildTransferPlan,
+  buildOriginPlan,
 } from "../src/domain/settlement.js";
 
 const config = {
@@ -62,10 +64,37 @@ function applyPlan(nodes, plan) {
   return balances;
 }
 
+function applyRemaining(nodes, plan) {
+  const balances = new Map(nodes.map((node) => [node.id, node.balanceCents]));
+
+  plan.forEach((transfer) => {
+    balances.set(
+      transfer.fromId,
+      balances.get(transfer.fromId) + transfer.remainingCents
+    );
+    balances.set(
+      transfer.toId,
+      balances.get(transfer.toId) - transfer.remainingCents
+    );
+  });
+
+  return balances;
+}
+
 test("splitEqual distributes the remainder in cents", () => {
   assert.deepEqual(splitEqual(18000, 7), [2572, 2572, 2572, 2571, 2571, 2571, 2571]);
   assert.equal(splitEqual(18000, 7).reduce((sum, value) => sum + value, 0), 18000);
   assert.deepEqual(splitEqual(10000, 3), [3334, 3333, 3333]);
+});
+
+test("allocateProportional splits cents by weight and keeps the total", () => {
+  assert.deepEqual(allocateProportional(47000, [80000, 40000]), [31333, 15667]);
+  assert.deepEqual(allocateProportional(50000, [40000, 40000, 40000]), [16667, 16667, 16666]);
+  assert.deepEqual(allocateProportional(100, [1, 1, 1]), [34, 33, 33]);
+  assert.equal(
+    allocateProportional(47000, [80000, 40000]).reduce((sum, value) => sum + value, 0),
+    47000
+  );
 });
 
 test("allocateReais rounds prizes to whole reais and keeps the total exact", () => {
@@ -389,6 +418,333 @@ test("payments with unknown nodes block the settlement", () => {
   assert.equal(settlement.ok, false);
   assert.ok(settlement.errors.some((error) => error.code === "PAYMENT_UNKNOWN_NODE"));
   assert.equal(settlement.totals.sumBalanceCents, 0);
+});
+
+test("buildOriginPlan nets each pair and zeroes the ledger", () => {
+  const settlement = buildSettlement({
+    config,
+    players,
+    costs,
+    creditors: [],
+    winners,
+  });
+  const origin = buildOriginPlan(settlement);
+
+  assert.ok(origin.lines.length > 0);
+  assert.equal(origin.groups.length, 8);
+
+  const anaToMaria = origin.lines.find(
+    (line) => line.fromId === "p1" && line.toId === "p3"
+  );
+  assert.equal(anaToMaria.amountCents, 5417);
+  assert.deepEqual(
+    anaToMaria.components.map((component) => [
+      component.label,
+      component.sign,
+      component.amountCents,
+    ]),
+    [
+      ["Jogo", "+", 6667],
+      ["Salão", "-", 1250],
+    ]
+  );
+
+  const ruiToMaria = origin.lines.find(
+    (line) => line.fromId === "p6" && line.toId === "p3"
+  );
+  assert.equal(ruiToMaria.amountCents, 1167);
+  assert.deepEqual(
+    ruiToMaria.components.map((component) => [
+      component.label,
+      component.amountCents,
+    ]),
+    [
+      ["Jogo", 2667],
+      ["Snacks", 1500],
+    ]
+  );
+
+  const anaGroup = origin.groups.find((group) => group.id === "p1");
+  assert.equal(anaGroup.remainingCents, 7750);
+  assert.equal(anaGroup.incomingRemainingCents, 5000);
+  assert.equal(anaGroup.balanceCents, -2750);
+
+  const cross = origin.lines.find(
+    (line) => line.fromId === "p2" && line.toId === "p3"
+  );
+  assert.equal(cross.amountCents, 2298);
+  assert.equal(cross.components[0].label, "Acerto entre premiados");
+
+  const remaining = applyPlan(settlement.nodes, origin.lines);
+  remaining.forEach((balance) => assert.equal(balance, 0));
+});
+
+test("buildOriginPlan sends the prizes from the cash holder when the pot is in hand", () => {
+  const settlement = buildSettlement({
+    config,
+    players,
+    costs,
+    creditors: [],
+    winners,
+    cash: { inHand: true, holderId: "p1" },
+  });
+  const origin = buildOriginPlan(settlement);
+
+  const toMaria = origin.lines.find(
+    (line) => line.fromId === "p1" && line.toId === "p3"
+  );
+  const toJoao = origin.lines.find(
+    (line) => line.fromId === "p1" && line.toId === "p2"
+  );
+
+  assert.equal(toMaria.amountCents, 30050);
+  assert.equal(toJoao.amountCents, 14450);
+  assert.ok(!origin.lines.some((line) => line.fromId === "p4" && line.toId === "p3"));
+
+  const remaining = applyPlan(settlement.nodes, origin.lines);
+  remaining.forEach((balance) => assert.equal(balance, 0));
+});
+
+test("buildOriginPlan marks payments by payer and receiver pair", () => {
+  const settlement = buildSettlement({
+    config,
+    players,
+    costs,
+    creditors: [],
+    winners,
+    payments: [
+      {
+        id: "pay1",
+        fromId: "p1",
+        toId: "p3",
+        amountCents: 5000,
+        kind: "game",
+        costId: "",
+        createdAt: 1,
+      },
+      {
+        id: "pay2",
+        fromId: "p1",
+        toId: "p2",
+        amountCents: 1000,
+        createdAt: 2,
+      },
+    ],
+  });
+  const origin = buildOriginPlan(settlement);
+
+  const p1p3 = origin.lines.find(
+    (line) => line.fromId === "p1" && line.toId === "p3"
+  );
+  assert.equal(p1p3.amountCents, 5417);
+  assert.equal(p1p3.paidCents, 5000);
+  assert.equal(p1p3.remainingCents, 417);
+
+  const p1p2 = origin.lines.find(
+    (line) => line.fromId === "p1" && line.toId === "p2"
+  );
+  assert.equal(p1p2.amountCents, 2083);
+  assert.equal(p1p2.paidCents, 1000);
+  assert.equal(p1p2.remainingCents, 1083);
+
+  const remaining = applyRemaining(settlement.nodes, origin.lines);
+  remaining.forEach((balance) => assert.equal(balance, 0));
+});
+
+test("buildOriginPlan turns a reverse payment into more debt", () => {
+  const settlement = buildSettlement({
+    config,
+    players,
+    costs,
+    creditors: [],
+    winners,
+    payments: [
+      {
+        id: "pay1",
+        fromId: "p3",
+        toId: "p1",
+        amountCents: 1000,
+        createdAt: 1,
+      },
+    ],
+  });
+  const origin = buildOriginPlan(settlement);
+
+  const line = origin.lines.find(
+    (item) => item.fromId === "p1" && item.toId === "p3"
+  );
+  assert.equal(line.amountCents, 6417);
+  assert.equal(line.paidCents, 0);
+  assert.equal(line.remainingCents, 6417);
+  assert.ok(
+    line.components.some(
+      (component) =>
+        component.label === "Pagamento a mais" && component.amountCents === 1000
+    )
+  );
+
+  const remaining = applyRemaining(settlement.nodes, origin.lines);
+  remaining.forEach((balance) => assert.equal(balance, 0));
+});
+
+test("buildOriginPlan turns an overpayment into a refund line", () => {
+  const settlement = buildSettlement({
+    config,
+    players,
+    costs,
+    creditors: [],
+    winners,
+    payments: [
+      {
+        id: "pay1",
+        fromId: "p1",
+        toId: "p3",
+        amountCents: 6000,
+        createdAt: 1,
+      },
+    ],
+  });
+  const origin = buildOriginPlan(settlement);
+
+  assert.ok(
+    !origin.lines.some((line) => line.fromId === "p1" && line.toId === "p3")
+  );
+
+  const refund = origin.lines.find(
+    (line) => line.fromId === "p3" && line.toId === "p1"
+  );
+  assert.equal(refund.amountCents, 583);
+  assert.equal(refund.remainingCents, 583);
+  assert.equal(refund.components[0].label, "Devolução");
+
+  const remaining = applyRemaining(settlement.nodes, origin.lines);
+  remaining.forEach((balance) => assert.equal(balance, 0));
+});
+
+test("buildOriginPlan creates a refund for a payment with no obligation", () => {
+  const settlement = buildSettlement({
+    config,
+    players,
+    costs,
+    creditors: [],
+    winners,
+    payments: [
+      {
+        id: "pay1",
+        fromId: "p4",
+        toId: "p5",
+        amountCents: 500,
+        createdAt: 1,
+      },
+    ],
+  });
+  const origin = buildOriginPlan(settlement);
+
+  const refund = origin.lines.find(
+    (line) => line.fromId === "p5" && line.toId === "p4"
+  );
+  assert.equal(refund.amountCents, 500);
+  assert.equal(refund.components[0].label, "Devolução");
+
+  const remaining = applyRemaining(settlement.nodes, origin.lines);
+  remaining.forEach((balance) => assert.equal(balance, 0));
+});
+
+test("buildOriginPlan drops a pair whose obligations cancel out", () => {
+  const settlement = buildSettlement({
+    config: {
+      buyInCents: 2500,
+      buyInChips: 1000,
+      rebuyCents: 0,
+      rebuyChips: 0,
+      maxRebuys: 0,
+      paidPlaces: 1,
+    },
+    players: [
+      { id: "p1", name: "Ana", rebuys: 0 },
+      { id: "p2", name: "Bia", rebuys: 0 },
+    ],
+    costs: [
+      {
+        id: "c1",
+        label: "Salão",
+        amountCents: 5000,
+        creditorId: "p2",
+        participantIds: ["p1", "p2"],
+      },
+    ],
+    creditors: [],
+    winners: [{ playerId: "p1", chips: 1000 }],
+  });
+  const origin = buildOriginPlan(settlement);
+
+  assert.deepEqual(origin.lines, []);
+  assert.deepEqual(origin.groups, []);
+  assert.equal(settlement.totals.sumBalanceCents, 0);
+});
+
+test("buildOriginPlan handles a winner whose prize is smaller than the stake", () => {
+  const settlement = buildSettlement({
+    config: {
+      buyInCents: 10000,
+      buyInChips: 20000,
+      rebuyCents: 0,
+      rebuyChips: 0,
+      maxRebuys: 0,
+      paidPlaces: 2,
+    },
+    players: [
+      { id: "p1", name: "Ana", rebuys: 0 },
+      { id: "p2", name: "Bia", rebuys: 0 },
+    ],
+    costs: [],
+    creditors: [],
+    winners: [
+      { playerId: "p1", chips: 30000 },
+      { playerId: "p2", chips: 10000 },
+    ],
+  });
+  const origin = buildOriginPlan(settlement);
+
+  const cross = origin.lines.find(
+    (line) => line.fromId === "p2" && line.toId === "p1"
+  );
+  assert.equal(cross.amountCents, 5000);
+
+  const remaining = applyRemaining(settlement.nodes, origin.lines);
+  remaining.forEach((balance) => assert.equal(balance, 0));
+});
+
+test("buildOriginPlan sends cost shares to an external creditor", () => {
+  const settlement = buildSettlement({
+    config,
+    players,
+    costs: [{ ...costs[1], creditorId: "x1" }, costs[0]],
+    creditors: [{ id: "x1", name: "Seu Antônio" }],
+    winners,
+  });
+  const origin = buildOriginPlan(settlement);
+  const lines = origin.lines.filter((line) => line.toId === "x1");
+
+  assert.equal(lines.length, 6);
+  assert.ok(lines.every((line) => line.amountCents === 1500));
+
+  const remaining = applyPlan(settlement.nodes, origin.lines);
+  remaining.forEach((balance) => assert.equal(balance, 0));
+});
+
+test("buildOriginPlan stays empty until the settlement is complete", () => {
+  const settlement = buildSettlement({
+    config,
+    players,
+    costs,
+    creditors: [],
+    winners: [{ playerId: "p3", chips: 80000 }],
+  });
+  const origin = buildOriginPlan(settlement);
+
+  assert.deepEqual(origin.lines, []);
+  assert.deepEqual(origin.groups, []);
 });
 
 test("a settlement without costs keeps the old numbers", () => {

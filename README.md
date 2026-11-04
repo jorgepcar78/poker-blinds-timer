@@ -18,7 +18,7 @@ offline e tem um link ao vivo para as mesas acompanharem o timer.
 - Jogadores: cadastro individual ou colando uma lista de nomes; assento e rebuys
 - Mesa: sorteio de posições e dealer, com arrastar/soltar ou toque para trocar
 - Acerto final: custos por tipo (salão, snacks, outros) com participantes próprios, credor de
-  cada custo, plano de transferências, pagamentos parciais e saldo por jogador
+  cada custo, acerto por origem, plano mínimo ou caixa, pagamentos parciais e saldo por jogador
 - Prêmios em reais inteiros, proporcionais às fichas dos premiados
 - Resumo para WhatsApp: geral e uma mensagem por pessoa
 - Link ao vivo por QR code para 2–3 mesas acompanharem o timer
@@ -115,9 +115,20 @@ para o link ao vivo; o host publica a cada 15s e as mesas consultam a cada 4s.
   igualmente por maior resto.
 - **Saldo** = prêmio + custos que a pessoa adiantou − buy-in/rebuys − cota de custos −
   pagamentos já registrados. Positivo recebe; negativo paga.
+- **Por origem (padrão):** a entrada de cada perdedor é dividida entre os premiados na
+  proporção das fichas. O premiado não paga a própria entrada (ela já está no prêmio); a
+  diferença entre premiados aparece como **acerto entre premiados**. Salão e snacks vão para
+  quem adiantou cada custo.
+- Quando as mesmas duas pessoas se devem, o app **compensa o par** e mostra uma linha só com
+  a composição (ex.: `Jogo R$ 25,00 − Salão R$ 12,50`). Cada pessoa vê o que **paga** e o que
+  **recebe**, e o saldo é a diferença.
 - **Conferência:** a soma dos saldos de todas as pessoas é R$ 0,00.
-- O app sugere quem paga quem (modo direto) ou concentra tudo em um caixa. Cada pagamento
-  registrado recalcula o restante; valores parciais são aceitos.
+- Cada linha pode ser **conferida** com um toque: o app registra a transferência, marca
+  “conferido” dos dois lados, reduz o que falta e recalcula o saldo. **Desmarcar** desfaz. O
+  modo **Direto** compensa os saldos globalmente e faz menos transferências; o **Tudo no
+  caixa** concentra tudo em uma pessoa.
+- Conferências parciais ou para outra pessoa continuam aceitas no bloco manual e contam no
+  saldo.
 - Não há chave PIX no app: o pagamento é combinado no grupo e registrado aqui.
 - O pagamento é no fim e o host é um jogador normal. Quem adiantou um custo aparece como
   credor e recebe o reembolso na conta final.

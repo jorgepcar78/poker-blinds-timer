@@ -8,8 +8,13 @@ import {
   formatPerPerson,
   parseBrlToCents,
 } from "../../domain/money";
-import { buildTransferPlan } from "../../domain/settlement";
-import { buildGroupSummary, buildPersonSummary } from "../../domain/summary";
+import { buildOriginPlan, buildTransferPlan } from "../../domain/settlement";
+import {
+  buildGroupSummary,
+  buildOriginPersonSummary,
+  buildOriginSummary,
+  buildPersonSummary,
+} from "../../domain/summary";
 import {
   Accordion,
   Alert,
@@ -100,23 +105,28 @@ export default function SettlementTab() {
   const [summary, setSummary] = useState("");
   const [copyStatus, setCopyStatus] = useState("");
   const [status, setStatus] = useState("");
-  const [mode, setMode] = useState("direct");
+  const [mode, setMode] = useState("origin");
   const [caixaId, setCaixaId] = useState("");
   const [externalName, setExternalName] = useState("");
   const [personId, setPersonId] = useState("");
   const [manualFrom, setManualFrom] = useState("");
   const [manualTo, setManualTo] = useState("");
   const [manualAmount, setManualAmount] = useState(0);
-  const flashTimer = useRef(null);
-  const copyTimer = useRef(null);
+  const lastCheckRef = useRef(null);
 
-  useEffect(
-    () => () => {
-      if (flashTimer.current) window.clearTimeout(flashTimer.current);
-      if (copyTimer.current) window.clearTimeout(copyTimer.current);
-    },
-    []
-  );
+  useEffect(() => {
+    if (!status) return undefined;
+
+    const timer = window.setTimeout(() => setStatus(""), 3000);
+    return () => window.clearTimeout(timer);
+  }, [status]);
+
+  useEffect(() => {
+    if (!copyStatus) return undefined;
+
+    const timer = window.setTimeout(() => setCopyStatus(""), 2500);
+    return () => window.clearTimeout(timer);
+  }, [copyStatus]);
 
   const nodeById = useMemo(
     () => new Map(settlement.nodes.map((node) => [node.id, node])),
@@ -136,8 +146,9 @@ export default function SettlementTab() {
     () => buildTransferPlan(settlement, { mode, holderId }),
     [settlement, mode, holderId]
   );
+  const originPlan = useMemo(() => buildOriginPlan(settlement), [settlement]);
 
-  const groups = useMemo(() => {
+  const netGroups = useMemo(() => {
     const list = [];
     const byPayer = new Map();
 
@@ -153,12 +164,35 @@ export default function SettlementTab() {
     return list;
   }, [transfers, nodeById]);
 
+  const activeGroups = mode === "origin" ? originPlan.groups : netGroups;
+
   const nameOf = (nodeId) => nodeById.get(nodeId)?.name || "Alguém";
+  const componentsText = (line) =>
+    line.components
+      .map((component, index) => {
+        if (index === 0) {
+          return `${component.label} ${formatBrl(component.amountCents)}`;
+        }
+
+        return `${component.sign === "-" ? "−" : "+"} ${component.label} ${formatBrl(
+          component.amountCents
+        )}`;
+      })
+      .join(" ");
+  const paymentLabel = (payment) => {
+    if (payment.kind === "game") return "Jogo";
+    if (payment.kind === "cost") {
+      return (
+        settlement.costs.rows.find((row) => row.id === payment.costId)?.label ||
+        "Custo"
+      );
+    }
+    if (payment.kind === "other") return "Outro";
+    return "";
+  };
 
   const flash = (message) => {
     setStatus(message);
-    if (flashTimer.current) window.clearTimeout(flashTimer.current);
-    flashTimer.current = window.setTimeout(() => setStatus(""), 3000);
   };
 
   const handlePay = (transfer) => {
@@ -172,6 +206,25 @@ export default function SettlementTab() {
       registered
         ? `Pagamento de ${nameOf(transfer.fromId)} para ${nameOf(transfer.toId)} registrado.`
         : "Não foi possível registrar o pagamento."
+    );
+  };
+
+  const handleCheck = (line) => {
+    if (line.remainingCents <= 0) return;
+    if (lastCheckRef.current === line) return;
+
+    lastCheckRef.current = line;
+
+    const registered = addPayment({
+      fromId: line.fromId,
+      toId: line.toId,
+      amountCents: line.remainingCents,
+    });
+
+    flash(
+      registered
+        ? `Conferência de ${nameOf(line.fromId)} para ${nameOf(line.toId)} registrada.`
+        : "Não foi possível registrar a conferência."
     );
   };
 
@@ -220,13 +273,21 @@ export default function SettlementTab() {
   };
 
   const showGroupSummary = () => {
-    setSummary(buildGroupSummary(settlement, session, transfers));
+    setSummary(
+      mode === "origin"
+        ? buildOriginSummary(settlement, session, originPlan)
+        : buildGroupSummary(settlement, session, transfers)
+    );
   };
 
   const showPersonSummary = () => {
     const target = effectivePerson;
     if (!target) return;
-    setSummary(buildPersonSummary(settlement, session, target, transfers));
+    setSummary(
+      mode === "origin"
+        ? buildOriginPersonSummary(settlement, session, target, originPlan)
+        : buildPersonSummary(settlement, session, target, transfers)
+    );
   };
 
   const handleCopy = async () => {
@@ -238,9 +299,6 @@ export default function SettlementTab() {
     } catch {
       setCopyStatus("Não foi possível copiar. Selecione o texto abaixo.");
     }
-
-    if (copyTimer.current) window.clearTimeout(copyTimer.current);
-    copyTimer.current = window.setTimeout(() => setCopyStatus(""), 2500);
   };
 
   if (players.length < 2) {
@@ -637,11 +695,17 @@ export default function SettlementTab() {
             if (node.breakdown.advancedCents > 0) {
               parts.push(`adiantou ${formatBrl(node.breakdown.advancedCents)}`);
             }
+            if (node.breakdown.stakeCents > 0) {
+              parts.push(`menos ${formatBrl(node.breakdown.stakeCents)} de jogo`);
+            }
             if (node.breakdown.costsCents > 0) {
               parts.push(`menos ${formatBrl(node.breakdown.costsCents)} de custos`);
             }
             if (node.receivedCents > 0) {
               parts.push(`já recebeu ${formatBrl(node.receivedCents)}`);
+            }
+            if (node.sentCents > 0) {
+              parts.push(`já pagou ${formatBrl(node.sentCents)}`);
             }
 
             return (
@@ -669,16 +733,23 @@ export default function SettlementTab() {
       </Card>
 
       <Card>
-        <SectionTitle meta={`${transfers.length} transferência(s)`}>
-          Quem paga quem
+        <SectionTitle
+          meta={
+            mode === "origin"
+              ? `${originPlan.checked} de ${originPlan.lines.length} conferidos`
+              : `${transfers.length} transferência(s)`
+          }
+        >
+          Quem paga e quem recebe
         </SectionTitle>
 
         <div
           role="group"
           aria-label="Modo do acerto"
-          className="mt-3 grid grid-cols-2 gap-1 rounded-xl border border-white/10 bg-gray-950 p-1"
+          className="mt-3 grid grid-cols-3 gap-1 rounded-xl border border-white/10 bg-gray-950 p-1"
         >
           {[
+            ["origin", "Por origem"],
             ["direct", "Direto"],
             ["caixa", "Tudo no caixa"],
           ].map(([value, label]) => (
@@ -687,7 +758,7 @@ export default function SettlementTab() {
               type="button"
               aria-pressed={mode === value}
               onClick={() => setMode(value)}
-              className={`min-h-11 rounded-lg px-2 text-xs font-semibold transition-colors ${focusRing} ${
+              className={`min-h-11 rounded-lg px-1 text-[11px] font-semibold leading-tight transition-colors ${focusRing} ${
                 mode === value
                   ? "bg-white/10 text-white"
                   : "text-gray-400 hover:bg-white/5 hover:text-gray-200"
@@ -699,9 +770,11 @@ export default function SettlementTab() {
         </div>
 
         <p className="mt-2 text-xs leading-relaxed text-gray-400">
-          {mode === "direct"
-            ? "Cada um paga direto a quem recebe. Menos linhas, sem ninguém carregar o dinheiro dos outros."
-            : "Todos acertam com uma pessoa, que paga os credores. Útil quando o dinheiro já está com ela."}
+          {mode === "origin"
+            ? "Cada valor vai para quem é devido: o jogo aos premiados, o salão e os snacks a quem adiantou."
+            : mode === "direct"
+              ? "Cada um paga direto a quem recebe. Menos linhas, sem ninguém carregar o dinheiro dos outros."
+              : "Todos acertam com uma pessoa, que paga os credores. Útil quando o dinheiro já está com ela."}
         </p>
 
         {mode === "caixa" && (
@@ -721,69 +794,214 @@ export default function SettlementTab() {
         )}
 
         <div className="mt-3 space-y-2">
-          {groups.map((group) => {
-            const total = group.items.reduce((sum, item) => sum + item.amountCents, 0);
+          {mode === "origin" && originPlan.error && (
+            <Alert tone="error" className="text-xs">
+              {originPlan.error.message}
+            </Alert>
+          )}
 
-            return (
-              <div
-                key={group.payer?.id || "payer"}
-                className="rounded-lg border border-white/10 bg-gray-950/40 p-3"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-semibold text-white">
-                    {group.payer?.name || "Alguém"}
-                  </span>
-                  <Badge tone="amber">paga {formatBrl(total)}</Badge>
-                </div>
-
-                {group.items.map((transfer) => (
-                  <div
-                    key={`${transfer.fromId}-${transfer.toId}`}
-                    className="mt-2 flex items-center justify-between gap-3 border-t border-white/5 pt-2"
-                  >
-                    <span className="min-w-0 text-sm text-gray-300">
-                      →{" "}
-                      <span className="font-semibold text-white">
-                        {nameOf(transfer.toId)}
-                      </span>{" "}
-                      <span className="tabular-nums">{formatBrl(transfer.amountCents)}</span>
+          {mode === "origin"
+            ? !originPlan.error &&
+              originPlan.groups.map((group) => (
+                <div
+                  key={group.id}
+                  className="rounded-lg border border-white/10 bg-gray-950/40 p-3"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="truncate font-semibold text-white">
+                        {group.name}
+                      </span>
+                      {nodeById.get(group.id)?.kind === "external" && (
+                        <Badge tone="gray">fora do jogo</Badge>
+                      )}
                     </span>
-                    <Button
-                      size="sm"
-                      className="shrink-0"
-                      onClick={() => handlePay(transfer)}
+                    <Badge
+                      tone={
+                        group.balanceCents > 0
+                          ? "green"
+                          : group.balanceCents < 0
+                            ? "amber"
+                            : "gray"
+                      }
                     >
-                      Registrar pagamento
-                    </Button>
+                      {group.balanceCents > 0
+                        ? `recebe ${formatBrl(group.balanceCents)}`
+                        : group.balanceCents < 0
+                          ? `paga ${formatBrl(-group.balanceCents)}`
+                          : "acertado"}
+                    </Badge>
                   </div>
-                ))}
-              </div>
-            );
-          })}
 
-          {groups.length === 0 && (
+                  <p className="mt-1 text-xs text-gray-400">
+                    Paga {formatBrl(group.remainingCents)} · Recebe{" "}
+                    {formatBrl(group.incomingRemainingCents)}
+                  </p>
+
+                  {group.outgoing.length > 0 && (
+                    <div className="mt-2 text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                      Paga
+                    </div>
+                  )}
+
+                  {group.outgoing.map((line) => (
+                    <div
+                      key={`${line.fromId}-${line.toId}`}
+                      className="mt-2 flex items-center justify-between gap-3 border-t border-white/5 pt-2"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-sm text-gray-300">
+                          →{" "}
+                          <span className="font-semibold text-white">
+                            {nameOf(line.toId)}
+                          </span>{" "}
+                          <span className="tabular-nums">
+                            {formatBrl(line.amountCents)}
+                          </span>
+                        </div>
+                        <div className="text-xs text-gray-400">
+                          {componentsText(line)}
+                        </div>
+                        {line.paidCents > 0 && line.remainingCents > 0 && (
+                          <div className="text-xs text-gray-400">
+                            já conferido {formatBrl(line.paidCents)} · falta{" "}
+                            {formatBrl(line.remainingCents)}
+                          </div>
+                        )}
+                      </div>
+
+                      {line.remainingCents > 0 ? (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          icon="check_circle"
+                          className="shrink-0"
+                          onClick={() => handleCheck(line)}
+                        >
+                          Conferir
+                        </Button>
+                      ) : (
+                        <Badge tone="green" className="shrink-0">
+                          ✓ Conferido
+                        </Badge>
+                      )}
+                    </div>
+                  ))}
+
+                  {group.incoming.length > 0 && (
+                    <div className="mt-2 text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                      Recebe
+                    </div>
+                  )}
+
+                  {group.incoming.map((line) => (
+                    <div
+                      key={`in-${line.fromId}-${line.toId}`}
+                      className="mt-2 border-t border-white/5 pt-2"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-sm text-gray-300">
+                          ←{" "}
+                          <span className="font-semibold text-white">
+                            {nameOf(line.fromId)}
+                          </span>{" "}
+                          <span className="tabular-nums">
+                            {formatBrl(line.amountCents)}
+                          </span>
+                        </div>
+                        {line.remainingCents === 0 && (
+                          <span className="text-xs font-semibold text-green-300">
+                            ✓ conferido
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs text-gray-400">
+                        {componentsText(line)}
+                      </div>
+                      {line.paidCents > 0 && line.remainingCents > 0 && (
+                        <div className="text-xs text-gray-400">
+                          já conferido {formatBrl(line.paidCents)} · falta{" "}
+                          {formatBrl(line.remainingCents)}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ))
+            : netGroups.map((group) => {
+                const total = group.items.reduce(
+                  (sum, item) => sum + item.amountCents,
+                  0
+                );
+
+                return (
+                  <div
+                    key={group.payer?.id || "payer"}
+                    className="rounded-lg border border-white/10 bg-gray-950/40 p-3"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-white">
+                        {group.payer?.name || "Alguém"}
+                      </span>
+                      <Badge tone="amber">paga {formatBrl(total)}</Badge>
+                    </div>
+
+                    {group.items.map((transfer) => (
+                      <div
+                        key={`${transfer.fromId}-${transfer.toId}`}
+                        className="mt-2 flex items-center justify-between gap-3 border-t border-white/5 pt-2"
+                      >
+                        <span className="min-w-0 text-sm text-gray-300">
+                          →{" "}
+                          <span className="font-semibold text-white">
+                            {nameOf(transfer.toId)}
+                          </span>{" "}
+                          <span className="tabular-nums">
+                            {formatBrl(transfer.amountCents)}
+                          </span>
+                        </span>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          icon="check_circle"
+                          className="shrink-0"
+                          onClick={() => handlePay(transfer)}
+                        >
+                          Conferir
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
+
+          {activeGroups.length === 0 && (
             <p className="rounded-lg border border-dashed border-white/10 px-3 py-4 text-center text-xs text-gray-400">
               {!settlement.isComplete
                 ? "Preencha os premiados para liberar o plano."
                 : settlement.ok
-                  ? "Nenhuma transferência pendente."
+                  ? mode === "origin"
+                    ? originPlan.error
+                      ? "Não foi possível calcular o jogo."
+                      : "Nenhuma obrigação por origem."
+                    : "Nenhuma transferência pendente."
                   : "Corrija os dados para gerar o plano."}
             </p>
           )}
         </div>
 
-        {groups.length > 0 && (
+        {activeGroups.length > 0 && (
           <p className="mt-3 text-xs leading-relaxed text-gray-400">
-            Use <span className="font-semibold text-gray-200">Registrar pagamento</span> quando
-            o dinheiro já estiver com quem recebe. Para valor parcial ou outra pessoa, use o
-            bloco abaixo.
+            {mode === "origin"
+              ? "Toque em Conferir quando a transferência já estiver acertada. Quem recebe vê o check do outro lado; o saldo se recalcula."
+              : "Use Conferir quando o dinheiro já estiver com quem recebe. Para valor parcial ou outra pessoa, use o bloco abaixo."}
           </p>
         )}
       </Card>
 
       <Accordion
         id="settlement-manual"
-        title="Registrar outro pagamento"
+        title="Conferir outro acerto"
         meta="valor parcial ou outra pessoa"
       >
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -826,19 +1044,19 @@ export default function SettlementTab() {
             />
           </div>
           <Button onClick={handleManual} disabled={manualAmount <= 0}>
-            Registrar
+            Conferir
           </Button>
         </div>
 
         <p className="mt-2 text-xs leading-relaxed text-gray-400">
-          Aceita valor parcial e pagamento a mais. O saldo e o plano se recalculam.
+          Aceita valor parcial e valor a mais. O saldo e o plano se recalculam.
         </p>
       </Accordion>
 
       <Accordion
         id="settlement-payments"
-        title="Pagamentos registrados"
-        meta={`${payments.length} registro(s)`}
+        title="Conferências"
+        meta={`${payments.length} conferência(s)`}
       >
         <div className="space-y-2">
           {payments.slice().reverse().map((payment) => (
@@ -848,6 +1066,12 @@ export default function SettlementTab() {
             >
               <span className="min-w-0 text-gray-300">
                 {nameOf(payment.fromId)} → {nameOf(payment.toId)}
+                {paymentLabel(payment) && (
+                  <span className="text-xs text-gray-400">
+                    {" "}
+                    · {paymentLabel(payment)}
+                  </span>
+                )}
               </span>
               <span className="flex shrink-0 items-center gap-2">
                 <span className="font-semibold tabular-nums text-white">
@@ -858,14 +1082,14 @@ export default function SettlementTab() {
                   size="sm"
                   onClick={() => removePayment(payment.id)}
                 >
-                  desfazer
+                  desmarcar
                 </Button>
               </span>
             </div>
           ))}
 
           {payments.length === 0 && (
-            <p className="text-xs text-gray-400">Nada registrado ainda.</p>
+            <p className="text-xs text-gray-400">Nada conferido ainda.</p>
           )}
         </div>
 
@@ -959,7 +1183,9 @@ export default function SettlementTab() {
             variant="secondary"
             size="sm"
             onClick={showPersonSummary}
-            disabled={!settlement.isComplete}
+            disabled={
+              !settlement.isComplete || (mode === "origin" && !!originPlan.error)
+            }
           >
             Mensagem
           </Button>
@@ -969,7 +1195,9 @@ export default function SettlementTab() {
           variant="secondary"
           className="mt-2 w-full"
           onClick={showGroupSummary}
-          disabled={!settlement.isComplete}
+          disabled={
+            !settlement.isComplete || (mode === "origin" && !!originPlan.error)
+          }
         >
           Resumo geral do grupo
         </Button>

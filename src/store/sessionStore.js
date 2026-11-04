@@ -149,6 +149,11 @@ function normalizePayment(raw, validIds) {
     toId: raw.toId,
     amountCents,
     note: String(raw.note ?? "").slice(0, MAX_NOTE),
+    kind:
+      raw.kind === "game" || raw.kind === "cost" || raw.kind === "other"
+        ? raw.kind
+        : "",
+    costId: typeof raw.costId === "string" ? raw.costId.slice(0, 64) : "",
     createdAt: Number(raw.createdAt) || Date.now(),
   };
 }

@@ -25,6 +25,45 @@ export function splitEqual(totalCents, count) {
   return Array.from({ length: count }, (_, index) => base + (index < residual ? 1 : 0));
 }
 
+export function allocateProportional(totalCents, weights) {
+  const total = Math.round(Number(totalCents));
+  if (!Number.isSafeInteger(total) || total < 0) return null;
+  if (!Array.isArray(weights) || weights.length === 0) return null;
+
+  const list = weights.map((weight) => Math.round(Number(weight)));
+  if (list.some((weight) => !Number.isSafeInteger(weight) || weight < 0)) return null;
+
+  const totalWeight = list.reduce((sum, weight) => sum + weight, 0);
+  if (totalWeight <= 0) return null;
+
+  const base = [];
+  const remainders = [];
+
+  for (const weight of list) {
+    const numerator = total * weight;
+    if (!Number.isSafeInteger(numerator)) return null;
+
+    base.push(Math.floor(numerator / totalWeight));
+    remainders.push(numerator % totalWeight);
+  }
+
+  const residual = total - base.reduce((sum, value) => sum + value, 0);
+
+  const order = list
+    .map((_, index) => index)
+    .sort((a, b) => {
+      if (remainders[b] !== remainders[a]) return remainders[b] - remainders[a];
+      if (list[b] !== list[a]) return list[b] - list[a];
+      return a - b;
+    });
+
+  for (let index = 0; index < residual; index += 1) {
+    base[order[index]] += 1;
+  }
+
+  return base;
+}
+
 // Prize money is rounded to whole reais. The largest-remainder rule keeps the
 // sum exact; any leftover cents below R$ 1,00 go to the biggest stack.
 export function allocateReais(totalCents, weights) {
@@ -232,6 +271,421 @@ export function buildTransferPlan(settlement, { mode = "direct", holderId = null
   return mode === "caixa"
     ? cashierTransfers(settlement.nodes, holderId)
     : directTransfers(settlement.nodes);
+}
+
+function netOriginLines(lines) {
+  const directed = new Map();
+
+  lines.forEach((line) => {
+    const key = `${line.fromId}|${line.toId}`;
+    if (!directed.has(key)) {
+      directed.set(key, { fromId: line.fromId, toId: line.toId, components: [] });
+    }
+
+    const entry = directed.get(key);
+    const component = entry.components.find(
+      (item) =>
+        item.label === line.label &&
+        item.kind === line.kind &&
+        item.costId === line.costId
+    );
+
+    if (component) {
+      component.amountCents += line.amountCents;
+    } else {
+      entry.components.push({
+        label: line.label,
+        kind: line.kind,
+        costId: line.costId,
+        amountCents: line.amountCents,
+      });
+    }
+  });
+
+  const netted = [];
+  const seen = new Set();
+
+  directed.forEach((entry, key) => {
+    if (seen.has(key)) return;
+
+    const reverseKey = `${entry.toId}|${entry.fromId}`;
+    const reverse = directed.get(reverseKey);
+    seen.add(key);
+    seen.add(reverseKey);
+
+    const forwardTotal = entry.components.reduce(
+      (sum, item) => sum + item.amountCents,
+      0
+    );
+    const reverseTotal = reverse
+      ? reverse.components.reduce((sum, item) => sum + item.amountCents, 0)
+      : 0;
+
+    if (forwardTotal === reverseTotal) return;
+
+    const forwardWins = forwardTotal > reverseTotal;
+    const source = forwardWins ? entry : reverse;
+    const opposite = forwardWins ? reverse : entry;
+
+    netted.push({
+      fromId: source.fromId,
+      toId: source.toId,
+      amountCents: Math.abs(forwardTotal - reverseTotal),
+      components: source.components
+        .map((item) => ({ ...item, sign: "+" }))
+        .concat(
+          opposite
+            ? opposite.components.map((item) => ({ ...item, sign: "-" }))
+            : []
+        ),
+    });
+  });
+
+  return netted;
+}
+
+export function buildOriginPlan(settlement) {
+  const empty = {
+    lines: [],
+    groups: [],
+    remainingCents: 0,
+    checked: 0,
+    error: null,
+  };
+
+  if (!settlement || settlement.ok === false || settlement.isComplete === false) {
+    return empty;
+  }
+
+  const nodeById = new Map(settlement.nodes.map((node) => [node.id, node]));
+  const winners = settlement.payouts.filter(
+    (payout) =>
+      payout.chips > 0 && payout.prizeCents > 0 && nodeById.has(payout.playerId)
+  );
+
+  if (winners.length === 0) return empty;
+
+  const lines = [];
+
+  // Game: the non-winners' stakes fund the winners in proportion to their
+  // chips. A winner does not pay their own stake; the difference between the
+  // prize and the stake is settled between the winners ("acerto entre
+  // premiados"), which also absorbs the cent rounding of each split.
+  const stakeOf = (winner) => nodeById.get(winner.playerId)?.breakdown.stakeCents || 0;
+  const targetByWinner = new Map(
+    winners.map((winner) => [
+      winner.playerId,
+      winner.prizeCents - stakeOf(winner),
+    ])
+  );
+  const receivingWinners = winners.filter(
+    (winner) => (targetByWinner.get(winner.playerId) || 0) > 0
+  );
+
+  if (
+    settlement.cash?.inHand &&
+    settlement.cash.holderId &&
+    nodeById.has(settlement.cash.holderId)
+  ) {
+    const holderId = settlement.cash.holderId;
+
+    winners.forEach((winner) => {
+      if (winner.playerId === holderId) return;
+
+      lines.push({
+        fromId: holderId,
+        toId: winner.playerId,
+        amountCents: winner.prizeCents,
+        kind: "game",
+        costId: "",
+        label: "Jogo",
+      });
+    });
+  } else if (receivingWinners.length > 0) {
+    const receipts = new Map(
+      receivingWinners.map((winner) => [winner.playerId, 0])
+    );
+    let splitFailed = false;
+
+    settlement.nodes
+      .filter(
+        (node) =>
+          node.kind === "player" &&
+          node.breakdown.stakeCents > 0 &&
+          !winners.some((winner) => winner.playerId === node.id)
+      )
+      .forEach((node) => {
+        const split = allocateProportional(
+          node.breakdown.stakeCents,
+          receivingWinners.map((winner) => winner.chips)
+        );
+
+        if (!split) {
+          splitFailed = true;
+          return;
+        }
+
+        receivingWinners.forEach((winner, index) => {
+          const amountCents = split[index] || 0;
+          if (amountCents <= 0) return;
+
+          lines.push({
+            fromId: node.id,
+            toId: winner.playerId,
+            amountCents,
+            kind: "game",
+            costId: "",
+            label: "Jogo",
+          });
+
+          receipts.set(
+            winner.playerId,
+            (receipts.get(winner.playerId) || 0) + amountCents
+          );
+        });
+      });
+
+    if (splitFailed) {
+      return {
+        ...empty,
+        error: {
+          code: "GAME_SPLIT_OVERFLOW",
+          message: "As fichas são grandes demais para calcular o jogo.",
+        },
+      };
+    }
+
+    const residuals = winners.map((winner) => ({
+      id: winner.playerId,
+      balanceCents:
+        (targetByWinner.get(winner.playerId) || 0) -
+        (receipts.get(winner.playerId) || 0),
+    }));
+
+    directTransfers(residuals).forEach((transfer) => {
+      lines.push({
+        fromId: transfer.fromId,
+        toId: transfer.toId,
+        amountCents: transfer.amountCents,
+        kind: "game",
+        costId: "",
+        label: "Acerto entre premiados",
+      });
+    });
+  }
+
+  // Costs: each participant's share goes to whoever advanced the cost.
+  settlement.costs.rows.forEach((cost) => {
+    if (cost.amountCents <= 0 || !cost.creditorId || !nodeById.has(cost.creditorId)) {
+      return;
+    }
+
+    cost.participantIds.forEach((participantId) => {
+      const amountCents = cost.byPlayer[participantId] || 0;
+      if (amountCents <= 0 || participantId === cost.creditorId) return;
+
+      lines.push({
+        fromId: participantId,
+        toId: cost.creditorId,
+        amountCents,
+        kind: "cost",
+        costId: cost.id,
+        label: cost.label,
+      });
+    });
+  });
+
+  // Pair-wise netting: when the same two people owe each other, show one line
+  // with the composition instead of a round-trip.
+  const netted = netOriginLines(lines);
+
+  const payments = Array.isArray(settlement.payments) ? settlement.payments : [];
+  const paidByPair = new Map();
+
+  payments.forEach((payment) => {
+    const pair = `${payment.fromId}|${payment.toId}`;
+    paidByPair.set(pair, (paidByPair.get(pair) || 0) + payment.amountCents);
+  });
+
+  const handledPairs = new Set();
+  netted.forEach((line) => {
+    handledPairs.add(`${line.fromId}|${line.toId}`);
+    handledPairs.add(`${line.toId}|${line.fromId}`);
+  });
+
+  // Payments without a matching pair obligation are refunds: whoever received
+  // the money must return it, so the pair closes again.
+  const refunds = [];
+  const seenPaymentPairs = new Set();
+
+  payments.forEach((payment) => {
+    const forwardKey = `${payment.fromId}|${payment.toId}`;
+    const reverseKey = `${payment.toId}|${payment.fromId}`;
+    const canonical = [payment.fromId, payment.toId].sort().join("|");
+
+    if (seenPaymentPairs.has(canonical)) return;
+    seenPaymentPairs.add(canonical);
+
+    if (handledPairs.has(forwardKey)) return;
+
+    const forward = paidByPair.get(forwardKey) || 0;
+    const reverse = paidByPair.get(reverseKey) || 0;
+    const net = forward - reverse;
+
+    if (net === 0) return;
+
+    const amountCents = Math.abs(net);
+
+    refunds.push({
+      fromId: net > 0 ? payment.toId : payment.fromId,
+      toId: net > 0 ? payment.fromId : payment.toId,
+      amountCents,
+      components: [
+        {
+          label: "Devolução",
+          sign: "+",
+          amountCents,
+          kind: "refund",
+          costId: "",
+        },
+      ],
+    });
+  });
+
+  const entries = [];
+
+  netted.forEach((line, index) => {
+    const forwardPaid = paidByPair.get(`${line.fromId}|${line.toId}`) || 0;
+    const reversePaid = paidByPair.get(`${line.toId}|${line.fromId}`) || 0;
+    const netPaid = forwardPaid - reversePaid;
+    const remaining = line.amountCents - netPaid;
+
+    if (remaining < 0) {
+      const refund = -remaining;
+
+      entries.push({
+        fromId: line.toId,
+        toId: line.fromId,
+        amountCents: refund,
+        paidCents: 0,
+        remainingCents: refund,
+        components: [
+          {
+            label: "Devolução",
+            sign: "+",
+            amountCents: refund,
+            kind: "refund",
+            costId: "",
+          },
+        ],
+        index,
+      });
+      return;
+    }
+
+    if (remaining === 0) {
+      entries.push({
+        ...line,
+        index,
+        paidCents: line.amountCents,
+        remainingCents: 0,
+      });
+      return;
+    }
+
+    if (netPaid < 0) {
+      const overpaid = -netPaid;
+
+      entries.push({
+        ...line,
+        amountCents: line.amountCents + overpaid,
+        paidCents: 0,
+        remainingCents: line.amountCents + overpaid,
+        components: line.components.concat([
+          {
+            label: "Pagamento a mais",
+            sign: "+",
+            amountCents: overpaid,
+            kind: "payment",
+            costId: "",
+          },
+        ]),
+        index,
+      });
+      return;
+    }
+
+    entries.push({
+      ...line,
+      index,
+      paidCents: netPaid,
+      remainingCents: remaining,
+    });
+  });
+
+  refunds.forEach((line, index) => {
+    entries.push({
+      ...line,
+      index: netted.length + index,
+      paidCents: 0,
+      remainingCents: line.amountCents,
+    });
+  });
+
+  const groups = [];
+  const groupByPerson = new Map();
+
+  const ensureGroup = (nodeId) => {
+    if (!groupByPerson.has(nodeId)) {
+      const node = nodeById.get(nodeId);
+      const group = {
+        id: nodeId,
+        name: node?.name || "Alguém",
+        outgoing: [],
+        incoming: [],
+        remainingCents: 0,
+        incomingRemainingCents: 0,
+        balanceCents: node?.balanceCents || 0,
+      };
+
+      groupByPerson.set(nodeId, group);
+      groups.push(group);
+    }
+
+    return groupByPerson.get(nodeId);
+  };
+
+  entries.forEach((entry) => {
+    const payer = ensureGroup(entry.fromId);
+    payer.outgoing.push(entry);
+    payer.remainingCents += entry.remainingCents;
+
+    const receiver = ensureGroup(entry.toId);
+    receiver.incoming.push(entry);
+    receiver.incomingRemainingCents += entry.remainingCents;
+  });
+
+  groups.forEach((group) => {
+    group.outgoing.sort((a, b) => a.index - b.index);
+    group.incoming.sort((a, b) => a.index - b.index);
+  });
+
+  const nodeOrder = new Map(
+    settlement.nodes.map((node, index) => [node.id, index])
+  );
+  groups.sort(
+    (a, b) =>
+      (nodeOrder.get(a.id) ?? Number.MAX_SAFE_INTEGER) -
+      (nodeOrder.get(b.id) ?? Number.MAX_SAFE_INTEGER)
+  );
+
+  return {
+    lines: entries,
+    groups,
+    remainingCents: entries.reduce((sum, entry) => sum + entry.remainingCents, 0),
+    checked: entries.filter((entry) => entry.remainingCents === 0).length,
+    error: null,
+  };
 }
 
 export function buildSettlement({
@@ -443,6 +897,11 @@ export function buildSettlement({
       toId: payment.toId,
       amountCents,
       note: String(payment.note ?? "").slice(0, 80),
+      kind:
+        payment.kind === "game" || payment.kind === "cost" || payment.kind === "other"
+          ? payment.kind
+          : "",
+      costId: typeof payment.costId === "string" ? payment.costId.slice(0, 64) : "",
       createdAt: Number(payment.createdAt) || 0,
     });
   });

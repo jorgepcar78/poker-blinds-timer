@@ -493,7 +493,7 @@ export default function useSession() {
   );
 
   const addPayment = useCallback(
-    ({ fromId, toId, amountCents, note = "" }) => {
+    ({ fromId, toId, amountCents, note = "", kind = "", costId = "" }) => {
       const amount = Math.min(
         MAX_AMOUNT_CENTS,
         Math.round(Number(amountCents) || 0)
@@ -523,6 +523,9 @@ export default function useSession() {
             toId,
             amountCents: amount,
             note: String(note ?? "").slice(0, 80),
+            kind:
+              kind === "game" || kind === "cost" || kind === "other" ? kind : "",
+            costId: typeof costId === "string" ? costId.slice(0, 64) : "",
             createdAt: Date.now(),
           },
         ],
