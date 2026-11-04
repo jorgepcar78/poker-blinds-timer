@@ -25,7 +25,9 @@ export function splitEqual(totalCents, count) {
   return Array.from({ length: count }, (_, index) => base + (index < residual ? 1 : 0));
 }
 
-export function allocateProportional(totalCents, weights) {
+// Prize money is rounded to whole reais. The largest-remainder rule keeps the
+// sum exact; any leftover cents below R$ 1,00 go to the biggest stack.
+export function allocateReais(totalCents, weights) {
   const total = Math.round(Number(totalCents));
   if (!Number.isSafeInteger(total) || total < 0) return null;
   if (!Array.isArray(weights) || weights.length === 0) return null;
@@ -36,18 +38,18 @@ export function allocateProportional(totalCents, weights) {
   const totalWeight = list.reduce((sum, weight) => sum + weight, 0);
   if (totalWeight <= 0) return null;
 
-  const base = [];
-  const remainders = [];
+  const exact = [];
 
   for (const weight of list) {
     const numerator = total * weight;
     if (!Number.isSafeInteger(numerator)) return null;
-
-    base.push(Math.floor(numerator / totalWeight));
-    remainders.push(numerator % totalWeight);
+    exact.push(numerator / totalWeight);
   }
 
-  const residual = total - base.reduce((sum, value) => sum + value, 0);
+  const base = exact.map((value) => Math.floor(value / 100));
+  const remainders = exact.map((value, index) => value - base[index] * 100);
+  const totalReais = Math.floor(total / 100);
+  const residual = totalReais - base.reduce((sum, value) => sum + value, 0);
 
   const order = list
     .map((_, index) => index)
@@ -61,7 +63,11 @@ export function allocateProportional(totalCents, weights) {
     base[order[index]] += 1;
   }
 
-  return base;
+  const result = base.map((value) => value * 100);
+  const topIndex = list.indexOf(Math.max(...list));
+  result[topIndex] += total - result.reduce((sum, value) => sum + value, 0);
+
+  return result;
 }
 
 export function computePool(config, players) {
@@ -87,50 +93,161 @@ export function computePool(config, players) {
   };
 }
 
-export function computeRateio(config, players) {
-  const venueCents = toCents(config?.venueCents);
-  const snacksCents = toCents(config?.snacksCents);
-  const totalCents = venueCents + snacksCents;
-  const participants = players.filter((player) => player.inRateio);
+export function computeCosts(costs, players) {
+  const playerIds = new Set(players.map((player) => player.id));
 
-  if (totalCents > 0 && participants.length === 0) {
+  const rows = (Array.isArray(costs) ? costs : []).map((cost) => {
+    const label = String(cost?.label ?? "Custo").trim().slice(0, 24) || "Custo";
+    const amountCents = toCents(cost?.amountCents);
+    const participantIds = Array.from(
+      new Set(
+        (Array.isArray(cost?.participantIds) ? cost.participantIds : []).filter((id) =>
+          playerIds.has(id)
+        )
+      )
+    );
+    const creditorId = typeof cost?.creditorId === "string" ? cost.creditorId : "";
+
+    let error = null;
+
+    if (amountCents > 0 && participantIds.length === 0) {
+      error = issue(
+        "COST_NO_PARTICIPANTS",
+        `"${label}" tem valor e ninguém marcado para dividir.`
+      );
+    } else if (amountCents > 0 && !creditorId) {
+      error = issue("COST_NO_CREDITOR", `Informe quem adiantou "${label}".`);
+    }
+
+    const shares =
+      amountCents > 0 && participantIds.length > 0
+        ? splitEqual(amountCents, participantIds.length)
+        : [];
+    const byPlayer = {};
+
+    participantIds.forEach((playerId, index) => {
+      byPlayer[playerId] = shares[index] ?? 0;
+    });
+
     return {
-      totalCents,
-      venueCents,
-      snacksCents,
-      participants: 0,
-      byPlayer: {},
-      error: issue(
-        "NO_RATEIO_PARTICIPANTS",
-        "Há custos de salão/lanche, mas nenhum jogador participa do rateio."
-      ),
+      id: typeof cost?.id === "string" ? cost.id : "",
+      label,
+      amountCents,
+      participantIds,
+      creditorId,
+      byPlayer,
+      error,
     };
-  }
+  });
 
-  const shares = totalCents > 0 ? splitEqual(totalCents, participants.length) : [];
+  const totalCents = rows.reduce((sum, row) => sum + row.amountCents, 0);
   const byPlayer = {};
+  const participants = new Set();
 
-  participants.forEach((player, index) => {
-    byPlayer[player.id] = shares[index] ?? 0;
+  rows.forEach((row) => {
+    Object.entries(row.byPlayer).forEach(([playerId, cents]) => {
+      byPlayer[playerId] = (byPlayer[playerId] ?? 0) + cents;
+      participants.add(playerId);
+    });
   });
 
   return {
+    rows,
     totalCents,
-    venueCents,
-    snacksCents,
-    participants: participants.length,
     byPlayer,
-    error: null,
+    participants: participants.size,
+    errors: rows.map((row) => row.error).filter(Boolean),
   };
 }
 
-export function buildSettlement({ config, players = [], winners = [] }) {
+function directTransfers(nodes) {
+  const debtors = nodes
+    .filter((node) => node.balanceCents < 0)
+    .sort((a, b) => a.balanceCents - b.balanceCents || a.id.localeCompare(b.id));
+  const creditors = nodes
+    .filter((node) => node.balanceCents > 0)
+    .sort((a, b) => b.balanceCents - a.balanceCents || a.id.localeCompare(b.id));
+
+  const left = debtors.map((node) => ({ id: node.id, amount: -node.balanceCents }));
+  const right = creditors.map((node) => ({ id: node.id, amount: node.balanceCents }));
+  const transfers = [];
+
+  let debtorIndex = 0;
+  let creditorIndex = 0;
+
+  while (debtorIndex < left.length && creditorIndex < right.length) {
+    const amount = Math.min(left[debtorIndex].amount, right[creditorIndex].amount);
+
+    if (amount > 0) {
+      transfers.push({
+        fromId: left[debtorIndex].id,
+        toId: right[creditorIndex].id,
+        amountCents: amount,
+      });
+    }
+
+    left[debtorIndex].amount -= amount;
+    right[creditorIndex].amount -= amount;
+
+    if (left[debtorIndex].amount === 0) debtorIndex += 1;
+    if (right[creditorIndex].amount === 0) creditorIndex += 1;
+  }
+
+  return transfers;
+}
+
+function cashierTransfers(nodes, holderId) {
+  const holder = nodes.find((node) => node.id === holderId && node.kind === "player");
+  if (!holder) return [];
+
+  const transfers = [];
+
+  nodes.forEach((node) => {
+    if (node.id !== holderId && node.balanceCents < 0) {
+      transfers.push({
+        fromId: node.id,
+        toId: holderId,
+        amountCents: -node.balanceCents,
+      });
+    }
+  });
+
+  nodes.forEach((node) => {
+    if (node.id !== holderId && node.balanceCents > 0) {
+      transfers.push({
+        fromId: holderId,
+        toId: node.id,
+        amountCents: node.balanceCents,
+      });
+    }
+  });
+
+  return transfers;
+}
+
+export function buildTransferPlan(settlement, { mode = "direct", holderId = null } = {}) {
+  if (!settlement || settlement.ok === false || settlement.isComplete === false) return [];
+  if (!Array.isArray(settlement.nodes)) return [];
+
+  return mode === "caixa"
+    ? cashierTransfers(settlement.nodes, holderId)
+    : directTransfers(settlement.nodes);
+}
+
+export function buildSettlement({
+  config,
+  players = [],
+  costs = [],
+  creditors = [],
+  winners = [],
+  payments = [],
+  cash = null,
+}) {
   const errors = [];
   const warnings = [];
   const pool = computePool(config, players);
-  const rateio = computeRateio(config, players);
-
-  if (rateio.error) errors.push(rateio.error);
+  const costSummary = computeCosts(costs, players);
+  costSummary.errors.forEach((error) => errors.push(error));
 
   const paidPlaces = Math.round(Number(config?.paidPlaces) || 0);
 
@@ -161,46 +278,35 @@ export function buildSettlement({ config, players = [], winners = [] }) {
     }
   });
 
+  const playerIds = new Set(players.map((player) => player.id));
   const entered = winners
-    .filter((winner) => winner && winner.playerId)
+    .slice(0, Math.max(paidPlaces, 0))
+    .filter((winner) => winner && winner.playerId && playerIds.has(winner.playerId))
     .map((winner) => ({
       playerId: winner.playerId,
       chips: Number(winner.chips),
     }));
 
-  const validWinners = entered.filter(
-    (winner) => Number.isInteger(winner.chips) && winner.chips > 0
-  );
+  const validWinners = [];
+  const seenWinners = new Set();
 
-  if (entered.length > paidPlaces) {
-    errors.push(
-      issue("TOO_MANY_WINNERS", "Há mais premiados preenchidos do que o número configurado.")
-    );
-  }
+  entered.forEach((winner) => {
+    if (!Number.isInteger(winner.chips) || winner.chips <= 0) return;
 
-  if (validWinners.length < paidPlaces) {
-    warnings.push(
-      issue(
-        "MISSING_WINNERS",
-        `Preencha as fichas dos ${paidPlaces} premiados para fechar o acerto.`
-      )
-    );
-  }
-
-  const uniquePlayers = new Set();
-  validWinners.forEach((winner) => {
-    const player = players.find((item) => item.id === winner.playerId);
-
-    if (!player) {
-      errors.push(issue("WINNER_NOT_IN_ROSTER", "Um dos premiados não está na lista de jogadores."));
+    if (seenWinners.has(winner.playerId)) {
+      errors.push(issue("DUPLICATE_WINNER", "O mesmo jogador foi informado mais de uma vez."));
       return;
     }
 
-    if (uniquePlayers.has(winner.playerId)) {
-      errors.push(issue("DUPLICATE_WINNER", "O mesmo jogador foi informado mais de uma vez."));
-    }
-    uniquePlayers.add(winner.playerId);
+    seenWinners.add(winner.playerId);
+    validWinners.push(winner);
   });
+
+  if (validWinners.length < paidPlaces) {
+    warnings.push(
+      issue("MISSING_WINNERS", `Preencha as fichas dos ${paidPlaces} premiados para fechar o acerto.`)
+    );
+  }
 
   const winnerChips = validWinners.reduce((sum, winner) => sum + winner.chips, 0);
 
@@ -213,16 +319,44 @@ export function buildSettlement({ config, players = [], winners = [] }) {
     );
   }
 
+  const nodes = [
+    ...players.map((player) => ({
+      id: player.id,
+      name: player.name || "Sem nome",
+      kind: "player",
+    })),
+    ...creditors.map((creditor) => ({
+      id: creditor.id,
+      name: creditor.name || "Sem nome",
+      kind: "external",
+    })),
+  ];
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+
+  costSummary.rows.forEach((row) => {
+    if (row.amountCents > 0 && row.creditorId && !nodeById.has(row.creditorId)) {
+      errors.push(issue("COST_CREDITOR_UNKNOWN", `O credor de "${row.label}" não está no acerto.`));
+    }
+  });
+
   let payouts = [];
   const prizeById = {};
+  const prizeBlocked = errors.some(
+    (error) =>
+      error.code === "WINNER_CHIPS_EXCEED_PLAY" || error.code === "DUPLICATE_WINNER"
+  );
 
-  if (errors.length === 0 && validWinners.length > 0) {
-    const prizes = allocateProportional(
+  if (validWinners.length > 0 && !prizeBlocked) {
+    const prizes = allocateReais(
       pool.poolCents,
       validWinners.map((winner) => winner.chips)
     );
 
-    if (prizes) {
+    if (!prizes) {
+      errors.push(
+        issue("PRIZE_OVERFLOW", "Não foi possível calcular os prêmios com esses valores.")
+      );
+    } else {
       const sorted = validWinners
         .map((winner, index) => ({
           ...winner,
@@ -244,47 +378,174 @@ export function buildSettlement({ config, players = [], winners = [] }) {
     }
   }
 
+  const advanceBy = {};
+  costSummary.rows.forEach((row) => {
+    if (row.amountCents > 0 && row.creditorId && nodeById.has(row.creditorId)) {
+      advanceBy[row.creditorId] = (advanceBy[row.creditorId] ?? 0) + row.amountCents;
+    }
+  });
+
+  const stakeById = {};
+  players.forEach((player) => {
+    const rebuys = Math.max(0, Math.round(Number(player.rebuys) || 0));
+    stakeById[player.id] = pool.buyInCents + rebuys * pool.rebuyCents;
+  });
+
+  const owedCents = {};
+  nodes.forEach((node) => {
+    owedCents[node.id] = 0;
+  });
+
+  players.forEach((player) => {
+    owedCents[player.id] =
+      (prizeById[player.id] ?? 0) -
+      (stakeById[player.id] ?? 0) -
+      (costSummary.byPlayer[player.id] ?? 0) +
+      (advanceBy[player.id] ?? 0);
+  });
+
+  creditors.forEach((creditor) => {
+    owedCents[creditor.id] = advanceBy[creditor.id] ?? 0;
+  });
+
+  const sentCents = {};
+  const receivedCents = {};
+  nodes.forEach((node) => {
+    sentCents[node.id] = 0;
+    receivedCents[node.id] = 0;
+  });
+
+  const normalizedPayments = [];
+
+  (Array.isArray(payments) ? payments : []).forEach((payment) => {
+    const amountCents = toCents(payment?.amountCents);
+
+    if (amountCents <= 0 || payment?.fromId === payment?.toId) {
+      errors.push(issue("INVALID_PAYMENT", "Um pagamento registrado está inválido."));
+      return;
+    }
+
+    if (!nodeById.has(payment?.fromId) || !nodeById.has(payment?.toId)) {
+      errors.push(
+        issue(
+          "PAYMENT_UNKNOWN_NODE",
+          "Um pagamento registrado aponta para alguém fora do acerto."
+        )
+      );
+      return;
+    }
+
+    sentCents[payment.fromId] += amountCents;
+    receivedCents[payment.toId] += amountCents;
+    normalizedPayments.push({
+      id: typeof payment.id === "string" ? payment.id : "",
+      fromId: payment.fromId,
+      toId: payment.toId,
+      amountCents,
+      note: String(payment.note ?? "").slice(0, 80),
+      createdAt: Number(payment.createdAt) || 0,
+    });
+  });
+
+  const cashInHand = Boolean(cash?.inHand);
+  const holderId =
+    cashInHand && cash?.holderId && nodeById.get(cash.holderId)?.kind === "player"
+      ? cash.holderId
+      : null;
+
+  if (cashInHand && !holderId) {
+    errors.push(issue("CASH_NO_HOLDER", "Escolha quem está com o dinheiro do buy-in."));
+  }
+
+  if (cashInHand && holderId) {
+    players.forEach((player) => {
+      const stake = stakeById[player.id] ?? 0;
+      sentCents[player.id] += stake;
+      receivedCents[holderId] += stake;
+    });
+  }
+
+  const ledgerNodes = nodes.map((node) => {
+    const balanceCents =
+      (owedCents[node.id] ?? 0) + (sentCents[node.id] ?? 0) - (receivedCents[node.id] ?? 0);
+
+    return {
+      ...node,
+      owedCents: owedCents[node.id] ?? 0,
+      sentCents: sentCents[node.id] ?? 0,
+      receivedCents: receivedCents[node.id] ?? 0,
+      balanceCents,
+      breakdown: {
+        stakeCents: stakeById[node.id] ?? 0,
+        costsCents: costSummary.byPlayer[node.id] ?? 0,
+        prizeCents: prizeById[node.id] ?? 0,
+        advancedCents: advanceBy[node.id] ?? 0,
+      },
+    };
+  });
+
   const rows = players.map((player) => {
     const playerRebuys = Math.max(0, Math.round(Number(player.rebuys) || 0));
+    const costShares = costSummary.rows
+      .filter((row) => (row.byPlayer[player.id] ?? 0) > 0)
+      .map((row) => ({
+        costId: row.id,
+        label: row.label,
+        cents: row.byPlayer[player.id],
+      }));
+    const rateioCents = costShares.reduce((sum, share) => sum + share.cents, 0);
     const gameCents = pool.buyInCents + playerRebuys * pool.rebuyCents;
-    const rateioCents = rateio.byPlayer[player.id] ?? 0;
-    const totalInvestedCents = gameCents + rateioCents;
     const prizeCents = prizeById[player.id] ?? 0;
     const payout = payouts.find((item) => item.playerId === player.id);
+    const ledgerNode = ledgerNodes.find((node) => node.id === player.id);
 
     return {
       ...player,
       gameCents,
       rateioCents,
-      totalInvestedCents,
+      costShares,
+      totalInvestedCents: gameCents + rateioCents,
       prizeCents,
-      balanceCents: prizeCents - totalInvestedCents,
+      balanceCents: ledgerNode.balanceCents,
+      sentCents: ledgerNode.sentCents,
+      receivedCents: ledgerNode.receivedCents,
       position: payout?.position ?? null,
     };
   });
 
-  const totals = {
-    poolCents: pool.poolCents,
-    costsCents: rateio.totalCents,
-    prizesCents: payouts.reduce((sum, payout) => sum + payout.prizeCents, 0),
-    totalInvestedCents: rows.reduce((sum, row) => sum + row.totalInvestedCents, 0),
-    balanceCents: rows.reduce((sum, row) => sum + row.balanceCents, 0),
-    cashDifferenceCents:
-      rows.reduce((sum, row) => sum + row.totalInvestedCents, 0) -
-      payouts.reduce((sum, payout) => sum + payout.prizeCents, 0) -
-      rateio.totalCents,
-  };
+  const prizesCents = payouts.reduce((sum, payout) => sum + payout.prizeCents, 0);
+  const balanceCents = ledgerNodes.reduce((sum, node) => sum + node.balanceCents, 0);
 
-  return {
+  const settlement = {
     isComplete: errors.length === 0 && validWinners.length === paidPlaces,
     ok: errors.length === 0,
     errors,
     warnings,
     pool,
-    rateio,
+    costs: costSummary,
     payouts,
-    rows,
-    totals,
     paidPlaces,
+    nodes: ledgerNodes,
+    receivables: ledgerNodes
+      .filter((node) => node.balanceCents > 0)
+      .sort((a, b) => b.balanceCents - a.balanceCents || a.name.localeCompare(b.name)),
+    payments: normalizedPayments,
+    cash: { inHand: cashInHand, holderId },
+    rows,
+    totals: {
+      poolCents: pool.poolCents,
+      prizesCents,
+      costsCents: costSummary.totalCents,
+      totalInvestedCents: pool.poolCents + costSummary.totalCents,
+      sumOwedCents: ledgerNodes.reduce((sum, node) => sum + node.owedCents, 0),
+      sumBalanceCents: balanceCents,
+      outstandingCents: ledgerNodes
+        .filter((node) => node.balanceCents < 0)
+        .reduce((sum, node) => sum - node.balanceCents, 0),
+    },
   };
+
+  settlement.transfers = buildTransferPlan(settlement);
+
+  return settlement;
 }

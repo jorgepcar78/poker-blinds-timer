@@ -1,7 +1,6 @@
 // src/components/session/SessionConfigCard.jsx
 
 import React from "react";
-import { formatBrl } from "../../domain/money";
 import { Alert, Card, Field, SectionTitle } from "../ui/ui";
 import { inputClass } from "../ui/styles";
 
@@ -27,9 +26,7 @@ export default function SessionConfigCard({ config, players, onChange, hideHeade
   return (
     <Wrapper>
       {!hideHeader && (
-        <SectionTitle meta={`Rateio: ${formatBrl(config.venueCents + config.snacksCents)}`}>
-          Regras do torneio
-        </SectionTitle>
+        <SectionTitle>Regras do torneio</SectionTitle>
       )}
 
       <div className={`grid grid-cols-2 gap-3 ${hideHeader ? "" : "mt-3"}`}>
@@ -104,35 +101,11 @@ export default function SessionConfigCard({ config, players, onChange, hideHeade
             className={inputClass}
           />
         </Field>
-
-        <Field label="Salão" suffix="R$">
-          <input
-            type="number"
-            min={0}
-            step="0.01"
-            inputMode="decimal"
-            value={config.venueCents / 100}
-            onChange={moneyChange("venueCents")}
-            className={inputClass}
-          />
-        </Field>
-
-        <Field label="Snacks" suffix="R$">
-          <input
-            type="number"
-            min={0}
-            step="0.01"
-            inputMode="decimal"
-            value={config.snacksCents / 100}
-            onChange={moneyChange("snacksCents")}
-            className={inputClass}
-          />
-        </Field>
       </div>
 
       <p className="mt-3 text-xs leading-relaxed text-gray-400">
         O máximo de rebuys pode ser aumentado durante o jogo. Se diminuir, os rebuys já
-        lançados são mantidos e sinalizados.
+        lançados são mantidos e sinalizados. Custos de salão e snacks ficam na aba Acerto.
       </p>
 
       {overCap.length > 0 && (

@@ -14,11 +14,13 @@ offline e tem um link ao vivo para as mesas acompanharem o timer.
 - Estruturas prontas: Turbo (5 min), Regular (20 min) e Deep stack (30 min)
 - Configurações com seções **Jogo** (blinds/presets) e **App** (som, instalação, diagnóstico)
   recolhíveis; **Som** e **Instalação** ficam lado a lado
-- Sessão do torneio: buy-in/rebuy, fichas, máximo de rebuys, salão, snacks e premiados
-- Jogadores: cadastro individual ou colando uma lista de nomes; assento, rebuys e rateio
+- Sessão do torneio: buy-in/rebuy, fichas, máximo de rebuys e premiados
+- Jogadores: cadastro individual ou colando uma lista de nomes; assento e rebuys
 - Mesa: sorteio de posições e dealer, com arrastar/soltar ou toque para trocar
-- Acerto final: prêmio proporcional às fichas, rateio, total investido e saldo por jogador
-- Uma chave PIX por premiado, incluída no resumo para WhatsApp
+- Acerto final: custos por tipo (salão, snacks, outros) com participantes próprios, credor de
+  cada custo, plano de transferências, pagamentos parciais e saldo por jogador
+- Prêmios em reais inteiros, proporcionais às fichas dos premiados
+- Resumo para WhatsApp: geral e uma mensagem por pessoa
 - Link ao vivo por QR code para 2–3 mesas acompanharem o timer
 - Preset da última sessão ao iniciar um novo torneio
 - PWA instalável, com funcionamento offline
@@ -37,7 +39,8 @@ offline e tem um link ao vivo para as mesas acompanharem o timer.
   `rounded-lg` para controles, `rounded-xl` para cards e pills em `rounded-full`.
 - **Cores:** preto, `gray-900` para cards, `green-500` com texto `gray-950` como única ação
   primária, `amber-400` para dealer/aviso e `red-600` para ações destrutivas.
-- **Torneio:** nomes e terminologia padronizados (Torneio, Pote, Premiados, Link ao vivo).
+- **Torneio:** nomes e terminologia padronizados (Torneio, Pote, Premiados, Custos, A receber,
+  Pagamentos, Link ao vivo).
 
 ## Stack
 
@@ -103,13 +106,31 @@ para o link ao vivo; o host publica a cada 15s e as mesas consultam a cada 4s.
 ## Como o dinheiro é calculado
 
 - Todos os valores são inteiros em centavos.
-- **Total investido** = buy-in + rebuys + rateio.
-- **Prêmio** = pote × fichas do premiado ÷ soma das fichas dos premiados, com arredondamento
-  por maior resto (a soma fecha exatamente com o pote).
-- **Rateio** = (salão + snacks) ÷ participantes, também por maior resto.
-- **Saldo** = prêmio − total investido. Positivo recebe; negativo paga.
-- Conferência: total investido = prêmios + custos.
-- O pagamento é no fim e o host é um jogador normal; o caixa é apenas o papel dele.
+- **Pote** = buy-ins + rebuys.
+- **Prêmio** = pote × fichas do premiado ÷ soma das fichas dos premiados, arredondado para
+  **reais inteiros** por maior resto. A soma dos prêmios fecha exatamente com o pote; a sobra
+  de centavos (menos de R$ 1,00) vai para o 1º lugar.
+- **Custos** = lista de salão, snacks e outros. Cada custo tem o próprio conjunto de
+  participantes e um credor (quem adiantou, jogador ou pessoa de fora). A cota é dividida
+  igualmente por maior resto.
+- **Saldo** = prêmio + custos que a pessoa adiantou − buy-in/rebuys − cota de custos −
+  pagamentos já registrados. Positivo recebe; negativo paga.
+- **Conferência:** a soma dos saldos de todas as pessoas é R$ 0,00.
+- O app sugere quem paga quem (modo direto) ou concentra tudo em um caixa. Cada pagamento
+  registrado recalcula o restante; valores parciais são aceitos.
+- Não há chave PIX no app: o pagamento é combinado no grupo e registrado aqui.
+- O pagamento é no fim e o host é um jogador normal. Quem adiantou um custo aparece como
+  credor e recebe o reembolso na conta final.
+
+### Migração da sessão
+
+A sessão salva é migrada automaticamente para o formato v2. Antes de gravar, o JSON antigo é
+preservado em `pb:session:v1:backup` no `localStorage`. Se a leitura falhar, o conteúdo
+original vai para `pb:session:v1:corrupt` e a sessão nova só é gravada depois da primeira
+alteração.
+
+Custos de salão e snacks vindos da v1 chegam **sem credor** (o formato antigo não registrava
+quem adiantou). Escolha a pessoa em **Custos da noite → Quem adiantou** para liberar o acerto.
 
 ## Safari / iPhone
 

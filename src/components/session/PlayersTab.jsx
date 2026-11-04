@@ -2,7 +2,7 @@
 
 import React, { useRef, useState } from "react";
 import { useSessionContext } from "../../context/SessionContext";
-import { formatBrl } from "../../domain/money";
+import { formatBrl, formatPerPerson } from "../../domain/money";
 import { parsePlayerNames } from "../../domain/players";
 import { MAX_PLAYERS } from "../../store/sessionStore";
 import SessionConfigCard from "./SessionConfigCard";
@@ -32,7 +32,6 @@ export default function PlayersTab() {
     removeAllPlayers,
     renamePlayer,
     adjustRebuys,
-    toggleRateio,
   } = useSessionContext();
 
   const [newName, setNewName] = useState("");
@@ -47,10 +46,6 @@ export default function PlayersTab() {
   const parsedNames = parsePlayerNames(bulkText);
   const namesToAdd = parsedNames.slice(0, room);
   const skipped = parsedNames.length - namesToAdd.length;
-  const rateioPerPerson =
-    settlement.rateio.participants > 0
-      ? Math.round(settlement.rateio.totalCents / settlement.rateio.participants)
-      : 0;
 
   const showStatus = (message) => {
     setStatus(message);
@@ -114,7 +109,7 @@ export default function PlayersTab() {
     const target =
       players.length === 1 ? "o jogador" : `os ${players.length} jogadores`;
     const confirmed = window.confirm(
-      `Excluir ${target}? Rebuys, assentos, prêmios e chaves PIX serão removidos.`
+      `Excluir ${target}? Rebuys, assentos, prêmios e pagamentos serão removidos.`
     );
 
     if (!confirmed) return;
@@ -297,25 +292,25 @@ export default function PlayersTab() {
                       disabled={player.rebuys >= config.maxRebuys}
                     />
                   </div>
-
-                  <label className="flex items-center gap-2 text-xs text-gray-300">
-                    <input
-                      type="checkbox"
-                      checked={player.inRateio}
-                      onChange={() => toggleRateio(player.id)}
-                      className="h-4 w-4 accent-green-500"
-                    />
-                    Participa do rateio
-                  </label>
                 </div>
 
                 <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-400">
                   <span className="tabular-nums">Jogo {formatBrl(row?.gameCents ?? 0)}</span>
-                  <span className="tabular-nums">Rateio {formatBrl(row?.rateioCents ?? 0)}</span>
+                  <span className="tabular-nums">Custos {formatBrl(row?.rateioCents ?? 0)}</span>
                   <span className="font-semibold tabular-nums text-gray-200">
                     Total {formatBrl(row?.totalInvestedCents ?? 0)}
                   </span>
                 </div>
+
+                {row?.costShares?.length > 0 && (
+                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-400">
+                    {row.costShares.map((share) => (
+                      <span key={share.costId} className="tabular-nums">
+                        {share.label} {formatBrl(share.cents)}
+                      </span>
+                    ))}
+                  </div>
+                )}
 
                 {overCap && (
                   <Alert tone="warning" className="mt-2 text-xs">
@@ -329,28 +324,40 @@ export default function PlayersTab() {
       )}
 
       <Card>
-        <SectionTitle meta={`${settlement.rateio.participants} participantes`}>
-          Pote e rateio
+        <SectionTitle meta={`${settlement.costs.participants} participante(s)`}>
+          Pote e custos
         </SectionTitle>
         <dl className="mt-3 space-y-1.5 text-sm">
           <div className="flex justify-between gap-3 text-gray-300">
             <dt>Pote</dt>
             <dd className="tabular-nums">{formatBrl(settlement.pool.poolCents)}</dd>
           </div>
-          <div className="flex justify-between gap-3 text-gray-300">
-            <dt>Rateio</dt>
-            <dd className="tabular-nums">{formatBrl(settlement.rateio.totalCents)}</dd>
-          </div>
-          {rateioPerPerson > 0 && (
-            <div className="text-right text-xs text-gray-400">
-              ~{formatBrl(rateioPerPerson)} por participante
+
+          {settlement.costs.rows.filter((row) => row.amountCents > 0).map((row) => (
+            <div key={row.id} className="flex justify-between gap-3 text-gray-300">
+              <dt className="min-w-0">
+                <span className="block truncate">{row.label}</span>
+                <span className="block text-xs text-gray-400">
+                  {row.participantIds.length} de {players.length} · {formatPerPerson(row.amountCents, row.participantIds.length)}
+                </span>
+              </dt>
+              <dd className="shrink-0 tabular-nums">{formatBrl(row.amountCents)}</dd>
             </div>
-          )}
+          ))}
+
+          <div className="flex justify-between gap-3 text-gray-300">
+            <dt>Custos</dt>
+            <dd className="tabular-nums">{formatBrl(settlement.totals.costsCents)}</dd>
+          </div>
+
           <div className="flex justify-between gap-3 border-t border-white/10 pt-2 font-semibold text-white">
             <dt>Total investido</dt>
             <dd className="tabular-nums">{formatBrl(settlement.totals.totalInvestedCents)}</dd>
           </div>
         </dl>
+        <p className="mt-2 text-xs leading-relaxed text-gray-400">
+          Configure salão, snacks e outros custos na aba Acerto.
+        </p>
       </Card>
 
       <Accordion

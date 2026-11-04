@@ -9,6 +9,7 @@ import SeatMap from "../components/session/SeatMap";
 import SettlementTab from "../components/session/SettlementTab";
 import LiveShareCard from "../components/session/LiveShareCard";
 import {
+  Alert,
   Badge,
   Button,
   Field,
@@ -30,6 +31,7 @@ export default function SessionPage() {
     session,
     players,
     settlement,
+    loadFailed,
     renameSession,
     startNewSession,
     liveStatus,
@@ -41,7 +43,7 @@ export default function SessionPage() {
 
   const handleNewSession = async () => {
     const confirmed = window.confirm(
-      "Iniciar um novo torneio? As regras e os nomes atuais serão mantidos; rebuys, assentos, premiados e o link ao vivo serão zerados."
+      "Iniciar um novo torneio? As regras, os nomes e os custos atuais serão mantidos; rebuys, assentos, premiados, pagamentos e o link ao vivo serão zerados."
     );
 
     if (!confirmed) return;
@@ -85,13 +87,20 @@ export default function SessionPage() {
         <span className="tabular-nums">{playerLabel}</span>
         <span className="tabular-nums">Pote {formatBrl(settlement.pool.poolCents)}</span>
         <span className="tabular-nums">{formatChips(settlement.pool.chipsInPlay)} fichas</span>
-        <span className="tabular-nums">Rateio {formatBrl(settlement.rateio.totalCents)}</span>
+        <span className="tabular-nums">Custos {formatBrl(settlement.totals.costsCents)}</span>
         {session.live?.active && (
           <Badge tone={liveError ? "amber" : "green"}>
             {liveError ? "Sem conexão" : "Ao vivo"}
           </Badge>
         )}
       </div>
+
+      {loadFailed && (
+        <Alert tone="warning" className="mb-3 text-xs">
+          Não foi possível ler a sessão salva. O conteúdo original foi preservado e as
+          próximas alterações criam uma sessão nova.
+        </Alert>
+      )}
 
       <Tabs tabs={TABS} value={tab} onChange={setTab} label="Seções do torneio" />
 

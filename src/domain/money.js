@@ -5,11 +5,39 @@ const brlFormatter = new Intl.NumberFormat("pt-BR", {
   currency: "BRL",
 });
 
+const brlWholeFormatter = new Intl.NumberFormat("pt-BR", {
+  style: "currency",
+  currency: "BRL",
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 0,
+});
+
 const chipFormatter = new Intl.NumberFormat("pt-BR");
 
 export function formatBrl(cents) {
   const value = Number(cents);
   return brlFormatter.format(Number.isFinite(value) ? value / 100 : 0);
+}
+
+export function formatBrlWhole(cents) {
+  const value = Math.round(Number(cents));
+  if (!Number.isFinite(value)) return brlWholeFormatter.format(0);
+  return value % 100 === 0 ? brlWholeFormatter.format(value / 100) : formatBrl(value);
+}
+
+export function formatPerPerson(totalCents, count) {
+  const total = Math.max(0, Math.round(Number(totalCents) || 0));
+  const people = Math.max(0, Math.round(Number(count) || 0));
+
+  if (total === 0) return formatBrl(0);
+  if (people === 0) return "sem participantes";
+
+  const base = Math.floor(total / people);
+  const rest = total - base * people;
+
+  return rest === 0
+    ? `${formatBrl(base)} cada`
+    : `${formatBrl(base)} a ${formatBrl(base + 1)} cada`;
 }
 
 export function formatChips(value) {
