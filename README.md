@@ -74,19 +74,21 @@ Deploy atual: **https://poker-blinds.pages.dev**
 O D1 `poker-blinds-timer` já foi criado e a migration `0001_live_sessions.sql` está aplicada
 no banco remoto. O binding `DB` e o `database_id` real estão no `wrangler.jsonc`.
 
-Para publicar uma nova versão:
+Para publicar uma nova versão, basta um push na `main`: o workflow
+`.github/workflows/ci.yml` roda lint, testes e build, e publica no Pages. Pull requests rodam
+só lint, testes e build, sem publicar.
+
+Para publicar manualmente (bypass do CI):
 
 ```bash
 npm run build
 npx wrangler pages deploy dist --project-name poker-blinds --branch main
 ```
 
-O deploy acima envia também `functions/` e o `_redirects`. Para automatizar via Git, conecte
-o repositório no painel do Pages:
-
-- Build command: `npm run build`
-- Output directory: `dist`
-- O binding D1 `DB` já está declarado no `wrangler.jsonc`.
+O deploy envia também `functions/` e o `_redirects`. O projeto Pages `poker-blinds` é do tipo
+**Direct Upload**, que não aceita ser conectado a um repositório Git (a escolha é definitiva
+nos dois sentidos) — por isso a automação vive no GitHub Actions, e não no painel do Pages.
+Os secrets `CLOUDFLARE_API_TOKEN` e `CLOUDFLARE_ACCOUNT_ID` ficam no repositório do GitHub.
 
 Para recriar o banco em outra conta: `npm run db:create`, atualize o `database_id` no
 `wrangler.jsonc` e rode `npm run db:migrate`.
@@ -97,9 +99,6 @@ As rotas novas da SPA precisam ser adicionadas em `public/_redirects` (hoje: `/m
 O plano Free da Cloudflare cobre este uso com folga: 100 mil requisições/dia no Workers e
 5 milhões de leituras + 100 mil escritas/dia no D1. O host e as mesas precisam de internet
 para o link ao vivo; o host publica a cada 15s e as mesas consultam a cada 4s.
-
-O `netlify.toml` continua no repositório como fallback legado, mas o backend do link ao vivo
-é exclusivo da Cloudflare.
 
 ## Como o dinheiro é calculado
 

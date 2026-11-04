@@ -7,5 +7,4 @@
 - Wake Lock API
 - Web Audio API
 - localStorage
-- Netlify
 - Openclaude
